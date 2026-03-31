@@ -1,0 +1,33 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model HeatZone {
+  id          Int      @id @default(autoincrement())
+  name        String
+  geometry    Json
+  temperature Float
+  intensity   Int
+  createdAt   DateTime @default(now())
+}
+
+model CitizenAction {
+  id        Int        @id @default(autoincrement())
+  type      ActionType
+  lat       Float
+  lng       Float
+  radius    Float
+  impact    Float
+  createdAt DateTime   @default(now())
+}
+
+enum ActionType {
+  VEGETATION
+  WATER_POINT
+  SHADE
+}
