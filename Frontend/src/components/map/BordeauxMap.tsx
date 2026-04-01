@@ -16,6 +16,9 @@ const DATAHUB_BASE =
   `https://datahub.bordeaux-metropole.fr/api/explore/v2.1/catalog/datasets`;
 
 const VEGETATION_DATASET = "met_vegetation_urbaine";
+const HEAT_DATASET = "ri_icu_ifu_s";
+const FOUNTAINS_DATASET = "bor_fontaines_eau_potable";
+
 const PAGE_SIZE = 100;
 const MAX_PER_COMMUNE = 2000; // Sécurité par code INSEE
 const CODE_INSEE_LIST = [
@@ -30,12 +33,59 @@ export default function BordeauxMap() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const vegetationLayerRef = useRef<L.GeoJSON | null>(null);
+  const heatLayerRef = useRef<L.GeoJSON | null>(null);
+  const fountainsLayerRef = useRef<L.LayerGroup | null>(null);
 
   const [vegVisible, setVegVisible] = useState(false);
+  const [heatVisible, setHeatVisible] = useState(false);
+  const [fountainsVisible, setFountainsVisible] = useState(false);
+
   const [loading, setLoading] = useState(false);
+  const [heatLoading, setHeatLoading] = useState(false);
+  const [fountainsLoading, setFountainsLoading] = useState(false);
+
   const [dataLoaded, setDataLoaded] = useState(false);
+  const [heatDataLoaded, setHeatDataLoaded] = useState(false);
+  const [fountainsDataLoaded, setFountainsDataLoaded] = useState(false);
+
   const [status, setStatus] = useState<string | null>(null);
   const [totalZones, setTotalZones] = useState(0);
+  const [heatZones, setHeatZones] = useState(0);
+  const [fountainsCount, setFountainsCount] = useState(0);
+
+  // ── Layer management ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    // Retirer toutes les couches
+    if (vegetationLayerRef.current) mapRef.current.removeLayer(vegetationLayerRef.current);
+    if (heatLayerRef.current) mapRef.current.removeLayer(heatLayerRef.current);
+    if (fountainsLayerRef.current) mapRef.current.removeLayer(fountainsLayerRef.current);
+
+    // Ajouter dans l'ordre souhaité : végétation (bas) -> îlots -> fontaines (haut)
+    if (vegVisible && vegetationLayerRef.current) {
+      vegetationLayerRef.current.addTo(mapRef.current);
+    }
+    if (heatVisible && heatLayerRef.current) {
+      heatLayerRef.current.addTo(mapRef.current);
+    }
+    if (fountainsVisible && fountainsLayerRef.current) {
+      fountainsLayerRef.current.addTo(mapRef.current);
+    }
+  }, [vegVisible, heatVisible, fountainsVisible]);
+
+  // ── Status updates ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (vegVisible && dataLoaded) {
+      setStatus(`${totalZones} zones affichées`);
+    } else if (heatVisible && heatDataLoaded) {
+      setStatus(`${heatZones} zones de chaleur/fraicheur affichées`);
+    } else if (fountainsVisible && fountainsDataLoaded) {
+      setStatus(`${fountainsCount} fontaines affichées`);
+    } else if (!vegVisible && !heatVisible && !fountainsVisible) {
+      setStatus(null);
+    }
+  }, [vegVisible, heatVisible, fountainsVisible, dataLoaded, heatDataLoaded, fountainsDataLoaded, totalZones, heatZones, fountainsCount]);
 
   // ── Map init ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -125,20 +175,21 @@ export default function BordeauxMap() {
       setTotalZones(allFeatures.length);
 
       const geoLayer = L.geoJSON(
-        { type: "FeatureCollection", features: allFeatures },
+        allFeatures,
         {
-          style: () => ({
-            fillColor: "#52b788",
-            fillOpacity: 0.5,
-            color: "#2d6a4f",
-            weight: 1,
-          }),
+          style: (feature) => {
+            const nbArbre = feature && feature.properties ? (feature.properties as DatahubRecord)?.nb_arbre : null;
+            return getVegetationStyle(nbArbre);
+          },
           onEachFeature: (feature, layer) => {
+            const nbArbre = feature && feature.properties ? (feature.properties as DatahubRecord)?.nb_arbre : null;
+            const baseStyle = getVegetationStyle(nbArbre);
+
             layer.on("mouseover", () => {
-              (layer as L.Path).setStyle({ weight: 2, color: "#1b4332", fillOpacity: 0.8 });
+              (layer as L.Path).setStyle({ ...baseStyle, weight: 2, color: "#1b4332", fillOpacity: Math.min(0.8, (baseStyle.fillOpacity as number) + 0.2) });
             });
             layer.on("mouseout", () => {
-              (layer as L.Path).setStyle({ fillColor: "#52b788", color: "#2d6a4f", weight: 1, fillOpacity: 0.5 });
+              (layer as L.Path).setStyle(baseStyle);
             });
             const props = feature.properties ?? {};
             const rows = Object.entries(props)
@@ -154,9 +205,7 @@ export default function BordeauxMap() {
       setDataLoaded(true);
       setStatus(`${allFeatures.length} zones chargées`);
 
-      if (mapRef.current) {
-        geoLayer.addTo(mapRef.current);
-      }
+      // La couche sera ajoutée/retirée par le useEffect selon vegVisible
     } catch (err) {
       console.error("Erreur chargement végétation:", err);
       setStatus("Erreur de chargement — voir console");
@@ -165,28 +214,222 @@ export default function BordeauxMap() {
     }
   }, []);
 
+  const getHeatColor = (delta: number | null): string => {
+    if (delta === null || delta === undefined || Number.isNaN(delta)) return "#999";
+    if (delta >= 3) return "#c1121f"; // chaud
+    if (delta >= 1) return "#f77f00";
+    if (delta >= -1) return "#ffd166";
+    if (delta >= -3) return "#48cae4";
+    return "#118ab2"; // frais
+  };
+
+  const getVegetationStyle = (nbArbre: number | null | undefined): L.PathOptions => {
+    const count = Number(nbArbre ?? 0);
+    if (!count || Number.isNaN(count) || count <= 0) {
+      return {
+        fillColor: "rgba(82, 183, 136, 0.08)",
+        fillOpacity: 0.08,
+        color: "rgba(45, 106, 79, 0.12)",
+        weight: 0.5,
+      };
+    }
+
+    const maxCount = 250;
+    const ratio = Math.min(1, count / maxCount);
+    const opacity = 0.08 + ratio * 0.5; // 0.08 -> 0.58 (plus transparent)
+    const lightness = 70 - ratio * 40; // 70% -> 30%
+    const fillColor = `hsl(140, 70%, ${lightness}%)`;
+
+    return {
+      fillColor,
+      fillOpacity: opacity,
+      color: "#2d6a4f",
+      weight: 1,
+    };
+  };
+
+  const fetchHeatIslands = useCallback(async () => {
+    setHeatLoading(true);
+    setStatus("Chargement îlots de chaleur/fraicheur…");
+
+    try {
+      const L = await import("leaflet");
+      const allFeatures: GeoJSON.Feature[] = [];
+
+      for (let i = 0; i < CODE_INSEE_LIST.length; i++) {
+        const insee = CODE_INSEE_LIST[i];
+        setStatus(`Chargement commune ${i + 1}/${CODE_INSEE_LIST.length}…`);
+        let offset = 0;
+
+        while (offset < MAX_PER_COMMUNE) {
+          const url = new URL(`${DATAHUB_BASE}/${HEAT_DATASET}/records`);
+          url.searchParams.set("limit", String(PAGE_SIZE));
+          url.searchParams.set("offset", String(offset));
+          url.searchParams.set("refine", `insee:"${insee}"`);
+
+          const res = await fetch(url.toString());
+          if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+
+          const data = await res.json();
+          const raw = data.results as DatahubRecord[];
+
+          const pageFeatures = raw
+            .map((rec) => {
+              const geoShape = rec.geo_shape;
+              if (!geoShape) return null;
+              const geometry: GeoJSON.Geometry = geoShape.geometry ?? geoShape;
+              if (!geometry?.type) return null;
+              return { type: "Feature" as const, geometry, properties: rec };
+            })
+            .filter(Boolean) as GeoJSON.Feature[];
+
+          allFeatures.push(...pageFeatures);
+          offset += PAGE_SIZE;
+
+          if (raw.length < PAGE_SIZE) break;
+        }
+      }
+
+      console.log(`[Îlots de chaleur] Total features chargées: ${allFeatures.length}`);
+      setHeatZones(allFeatures.length);
+
+      const geoLayer = L.geoJSON(
+        allFeatures,
+        {
+          style: (feature) => {
+            const delta = (feature && feature.properties ? (feature.properties as DatahubRecord)?.delta : null);
+            const diff = delta != null ? Number(delta) : null;
+            return {
+              fillColor: getHeatColor(diff),
+              fillOpacity: 0.4, // Plus transparent
+              color: "#5a5a5a",
+              weight: 1,
+            };
+          },
+          onEachFeature: (feature, layer) => {
+            layer.on("mouseover", () => {
+              (layer as L.Path).setStyle({ weight: 2, color: "#333", fillOpacity: 0.7 });
+            });
+            layer.on("mouseout", () => {
+              (layer as L.Path).setStyle({ fillOpacity: 0.4, color: "#5a5a5a", weight: 1 });
+            });
+            const props = feature.properties ?? {};
+            const rows = Object.entries(props)
+              .filter(([k]) => k !== "geo_shape")
+              .map(([k, v]) => `<div><b>${k}:</b> ${v}</div>`)
+              .join("");
+            if (rows)
+              layer.bindPopup(`<div style="font-family:system-ui;font-size:12px;max-height:200px;overflow:auto">${rows}</div>`);
+          },
+        }
+      );
+
+      heatLayerRef.current = geoLayer;
+      setHeatDataLoaded(true);
+      setStatus(`${allFeatures.length} zones de chaleur/fraicheur chargées`);
+
+      // La couche sera ajoutée/retirée par le useEffect selon heatVisible
+    } catch (err) {
+      console.error("Erreur chargement îlots de chaleur:", err);
+      setStatus("Erreur de chargement — voir console");
+    } finally {
+      setHeatLoading(false);
+    }
+  }, []);
+
+  const fetchFountains = useCallback(async () => {
+    setFountainsLoading(true);
+    setStatus("Chargement des fontaines…");
+
+    try {
+      const L = await import("leaflet");
+      const layerGroup = L.layerGroup();
+
+      let offset = 0;
+      const maxRecords = 5000; // Limite de sécurité
+
+      while (offset < maxRecords) {
+        const url = new URL(`${DATAHUB_BASE}/${FOUNTAINS_DATASET}/records`);
+        url.searchParams.set("limit", String(PAGE_SIZE));
+        url.searchParams.set("offset", String(offset));
+
+        const res = await fetch(url.toString());
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+
+        const data = await res.json();
+        const raw = data.results as DatahubRecord[];
+
+        for (const rec of raw) {
+          if (rec.geom && rec.geom.lat && rec.geom.lon) {
+            const marker = L.circleMarker([rec.geom.lat, rec.geom.lon], {
+              color: "#0066cc",
+              fillColor: "#0099ff",
+              fillOpacity: 0.8,
+              radius: 6,
+              weight: 2,
+            });
+
+            marker.on("mouseover", () => {
+              marker.setStyle({ radius: 8, fillOpacity: 1 });
+            });
+            marker.on("mouseout", () => {
+              marker.setStyle({ radius: 6, fillOpacity: 0.8 });
+            });
+
+            const props = Object.entries(rec)
+              .filter(([k]) => k !== "geom")
+              .map(([k, v]) => `<div><b>${k}:</b> ${v}</div>`)
+              .join("");
+            if (props) {
+              marker.bindPopup(`<div style="font-family:system-ui;font-size:12px;max-height:200px;overflow:auto">${props}</div>`);
+            }
+
+            layerGroup.addLayer(marker);
+          }
+        }
+
+        offset += PAGE_SIZE;
+        if (raw.length < PAGE_SIZE) break;
+      }
+
+      const markers = layerGroup.getLayers();
+      console.log(`[Fontaines] Total markers créés: ${markers.length}`);
+      setFountainsCount(markers.length);
+
+      fountainsLayerRef.current = layerGroup;
+      setFountainsDataLoaded(true);
+      setStatus(`${markers.length} fontaines chargées`);
+
+      // La couche sera ajoutée/retirée par le useEffect selon fountainsVisible
+    } catch (err) {
+      console.error("Erreur chargement fontaines:", err);
+      setStatus("Erreur de chargement — voir console");
+    } finally {
+      setFountainsLoading(false);
+    }
+  }, []);
+
   // ── Toggle handler ──────────────────────────────────────────────────────────
   const handleToggleVegetation = useCallback(async () => {
     if (!dataLoaded) {
-      setVegVisible(true);
       await fetchVegetation();
-      return;
     }
+    setVegVisible(!vegVisible);
+  }, [dataLoaded, vegVisible, fetchVegetation]);
 
-    if (vegVisible) {
-      if (vegetationLayerRef.current && mapRef.current) {
-        mapRef.current.removeLayer(vegetationLayerRef.current);
-      }
-      setVegVisible(false);
-      setStatus(null);
-    } else {
-      if (vegetationLayerRef.current && mapRef.current) {
-        vegetationLayerRef.current.addTo(mapRef.current);
-      }
-      setVegVisible(true);
-      setStatus(`${totalZones} zones affichées`);
+  const handleToggleHeat = useCallback(async () => {
+    if (!heatDataLoaded) {
+      await fetchHeatIslands();
     }
-  }, [dataLoaded, vegVisible, fetchVegetation, totalZones]);
+    setHeatVisible(!heatVisible);
+  }, [heatDataLoaded, heatVisible, fetchHeatIslands]);
+
+  const handleToggleFountains = useCallback(async () => {
+    if (!fountainsDataLoaded) {
+      await fetchFountains();
+    }
+    setFountainsVisible(!fountainsVisible);
+  }, [fountainsDataLoaded, fountainsVisible, fetchFountains]);
 
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -217,22 +460,35 @@ export default function BordeauxMap() {
             {loading && <span className="btn-spinner" />}
           </button>
 
-          <button className="layer-btn" disabled>
+          <button
+            className={`layer-btn ${heatVisible ? "active" : ""}`}
+            onClick={handleToggleHeat}
+            disabled={heatLoading}
+            aria-pressed={heatVisible}
+          >
+            <span className="layer-icon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="5"/>
+                <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+              </svg>
+            </span>
+            Îlots de chaleur/fraicheur
+            {heatLoading && <span className="btn-spinner" />}
+          </button>
+
+          <button
+            className={`layer-btn ${fountainsVisible ? "active" : ""}`}
+            onClick={handleToggleFountains}
+            disabled={fountainsLoading}
+            aria-pressed={fountainsVisible}
+          >
             <span className="layer-icon">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/>
               </svg>
             </span>
-            Îlots de chaleur
-          </button>
-
-          <button className="layer-btn" disabled>
-            <span className="layer-icon">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2v6m0 0c0 0-4 2-4 6s4 8 4 8 4-4 4-8-4-6-4-6z"/>
-              </svg>
-            </span>
             Fontaines
+            {fountainsLoading && <span className="btn-spinner" />}
           </button>
         </div>
 
@@ -248,13 +504,45 @@ export default function BordeauxMap() {
       <div ref={mapContainerRef} className="map-container" />
 
       {/* ── Legend ── */}
-      {vegVisible && !loading && (
+      {(vegVisible || heatVisible || fountainsVisible) && !(loading || heatLoading || fountainsLoading) && (
         <div className="map-legend">
-          <p className="legend-title">Végétation urbaine</p>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ width: 16, height: 16, background: "#52b788", border: "1px solid #2d6a4f", borderRadius: 3 }} />
-            <span style={{ fontSize: 12, color: "#555" }}>{totalZones} zones</span>
-          </div>
+          {vegVisible && (
+            <div style={{ marginBottom: (heatVisible || fountainsVisible) ? 10 : 0 }}>
+              <p className="legend-title">Végétation urbaine</p>
+              <div className="legend-gradient" />
+              <div className="legend-labels">
+                <span>Faible végétation</span>
+                <span>Forte végétation</span>
+              </div>
+            </div>
+          )}
+
+          {heatVisible && (
+            <div style={{ marginBottom: fountainsVisible ? 10 : 0 }}>
+              <p className="legend-title">Îlots de chaleur/fraicheur</p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ width: 16, height: 16, background: "#c1121f", border: "1px solid #a00017", borderRadius: 3 }} />
+                  <span style={{ fontSize: 12, color: "#555" }}>+ chaud</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ width: 16, height: 16, background: "#118ab2", border: "1px solid #0e6688", borderRadius: 3 }} />
+                  <span style={{ fontSize: 12, color: "#555" }}>+ frais</span>
+                </div>
+                <span style={{ fontSize: 12, color: "#555" }}>{heatZones} zones</span>
+              </div>
+            </div>
+          )}
+
+          {fountainsVisible && (
+            <div>
+              <p className="legend-title">Fontaines d'eau potable</p>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ width: 12, height: 12, background: "#0099ff", border: "2px solid #0066cc", borderRadius: "50%" }} />
+                <span style={{ fontSize: 12, color: "#555" }}>{fountainsCount} fontaines</span>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
