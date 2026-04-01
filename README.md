@@ -134,6 +134,8 @@ Prototyper une solution permettant de :
   - [DataHUB - Ilot de chaleur ou de fraicheur urbain](https://datahub.bordeaux-metropole.fr/explore/dataset/ri_icu_ifu_s/information/?disjunctive.insee&disjunctive.dimension)
   - [DataHUB - Végétation urbaine de Bordeaux Métropole](https://datahub.bordeaux-metropole.fr/explore/dataset/met_vegetation_urbaine/information/?disjunctive.insee&disjunctive.nom)
   - [DataHUB - Fontaines d'eau potable de la ville de Bordeaux](https://datahub.bordeaux-metropole.fr/explore/dataset/bor_fontaines_eau_potable/information/?disjunctive.etat&disjunctive.modele_fontaine)
+  - [DataHUB - Fontaines d'eau potable de la ville de Mérignac](https://datahub.bordeaux-metropole.fr/explore/dataset/mer_points-d-eau-potable/information/)
+  - [DataHUB - Fontaines d'eau potable de la ville de Talence](https://datahub.bordeaux-metropole.fr/explore/dataset/tal_pointseaulibreacces/api/?location=13,44.80894,-0.5712&basemap=jawg.streets)
   - [DataHUB - Indice de confort thermique urbain](https://datahub.bordeaux-metropole.fr/explore/dataset/ri_ictu_s/information/)
  
 ---
