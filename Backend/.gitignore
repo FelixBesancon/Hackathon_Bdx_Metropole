@@ -8,3 +8,7 @@
 *.tmp
 .env.local
 .env
+/migrations
+/prisma/migrations
+/prisma/dev.db
+/prisma/dev.db-journal
