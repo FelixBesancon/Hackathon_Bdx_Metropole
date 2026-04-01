@@ -1,6 +1,10 @@
+"use client";
+
 import Link from "next/link";
+import { useAuth } from "@/context/AuthContext";
 
 export default function Home() {
+  const { user } = useAuth();
   return (
     <main style={{
       flex: 1,
@@ -70,7 +74,7 @@ export default function Home() {
           }}>
             Explorer la carte
           </Link>
-          <Link href="/inscription" style={{
+          <Link href={user ? "/carte" : "/inscription"} style={{
             padding: "13px 28px",
             borderRadius: 10,
             fontSize: 14,

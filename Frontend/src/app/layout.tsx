@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "@/styles/globals.css";
 import Navbar from "@/components/Navbar";
+import { AuthProvider } from "@/context/AuthContext";
 
 export const metadata: Metadata = {
   title: "Bordeaux Métropole — Résilience urbaine",
@@ -16,8 +17,10 @@ export default function RootLayout({
   return (
     <html lang="fr">
       <body style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#f7f6f2", margin: 0 }}>
-        <Navbar />
-        {children}
+        <AuthProvider>
+          <Navbar />
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );

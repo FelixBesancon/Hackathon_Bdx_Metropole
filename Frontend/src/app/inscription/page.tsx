@@ -1,4 +1,47 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
+
 export default function InscriptionPage() {
+  const router = useRouter();
+  const { login } = useAuth();
+  const [prenom, setPrenom] = useState("");
+  const [nom, setNom] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, name: `${prenom} ${nom}`.trim() }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error ?? "Erreur lors de l'inscription");
+        return;
+      }
+
+      login(data.token, data.user);
+      router.push("/");
+    } catch {
+      setError("Impossible de contacter le serveur");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <main style={{
       flex: 1,
@@ -40,7 +83,7 @@ export default function InscriptionPage() {
           </p>
         </div>
 
-        <form style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ display: "flex", gap: 12 }}>
             <div style={{ flex: 1 }}>
               <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.4px" }}>
@@ -49,6 +92,9 @@ export default function InscriptionPage() {
               <input
                 type="text"
                 placeholder="Jean"
+                value={prenom}
+                onChange={(e) => setPrenom(e.target.value)}
+                required
                 style={{
                   width: "100%", padding: "10px 12px",
                   border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8,
@@ -64,6 +110,9 @@ export default function InscriptionPage() {
               <input
                 type="text"
                 placeholder="Dupont"
+                value={nom}
+                onChange={(e) => setNom(e.target.value)}
+                required
                 style={{
                   width: "100%", padding: "10px 12px",
                   border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8,
@@ -81,6 +130,9 @@ export default function InscriptionPage() {
             <input
               type="email"
               placeholder="jean.dupont@exemple.fr"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
               style={{
                 width: "100%", padding: "10px 12px",
                 border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8,
@@ -97,6 +149,9 @@ export default function InscriptionPage() {
             <input
               type="password"
               placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
               style={{
                 width: "100%", padding: "10px 12px",
                 border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8,
@@ -106,21 +161,28 @@ export default function InscriptionPage() {
             />
           </div>
 
+          {error && (
+            <p style={{ margin: 0, fontSize: 13, color: "#c0392b", textAlign: "center" }}>
+              {error}
+            </p>
+          )}
+
           <button
             type="submit"
+            disabled={loading}
             style={{
               padding: "12px",
               borderRadius: 8,
               fontSize: 14,
               fontWeight: 600,
               color: "white",
-              background: "#1b4332",
+              background: loading ? "#6b9e83" : "#1b4332",
               border: "none",
-              cursor: "pointer",
+              cursor: loading ? "not-allowed" : "pointer",
               marginTop: 4,
             }}
           >
-            Créer mon compte
+            {loading ? "Création en cours..." : "Créer mon compte"}
           </button>
         </form>
 
