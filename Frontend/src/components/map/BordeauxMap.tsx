@@ -69,7 +69,10 @@ export default function BordeauxMap() {
   useEffect(() => {
     if (mapRef.current || !mapContainerRef.current) return;
 
+    let cancelled = false;
+
     import("leaflet").then((L) => {
+      if (cancelled || mapRef.current) return;
       delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl;
       L.Icon.Default.mergeOptions({
         iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
@@ -97,6 +100,7 @@ export default function BordeauxMap() {
     });
 
     return () => {
+      cancelled = true;
       mapRef.current?.remove();
       mapRef.current = null;
     };

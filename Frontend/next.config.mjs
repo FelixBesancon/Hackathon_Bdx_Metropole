@@ -1,6 +1,5 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   // Leaflet uses browser globals — exclude from SSR bundling
   webpack: (config, { isServer }) => {
     if (isServer) {
