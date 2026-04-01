@@ -4,22 +4,8 @@ import { useEffect, useRef, useState, useCallback } from "react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-interface VegetationProperties {
-  nb_arbre: number;
-  nom?: string;
-  code_insee?: string;
-}
-
-interface DatahubRecord {
-  geo_shape?: {
-    geometry?: GeoJSON.Geometry;
-    type?: string;
-    coordinates?: unknown;
-  };
-  nb_arbre?: number;
-  nom?: string;
-  code_insee?: string;
-}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type DatahubRecord = Record<string, any>;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -27,29 +13,16 @@ const BORDEAUX_CENTER: [number, number] = [44.8378, -0.5792];
 const BORDEAUX_ZOOM = 12;
 
 const DATAHUB_BASE =
-  "https://datahub.bordeaux-metropole.fr/api/explore/v2.1/catalog/datasets";
+  `https://datahub.bordeaux-metropole.fr/api/explore/v2.1/catalog/datasets`;
 
 const VEGETATION_DATASET = "met_vegetation_urbaine";
 const PAGE_SIZE = 100;
-const MAX_RECORDS = 5000;
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function treeCountToColor(count: number, max: number): string {
-  if (max === 0) return "rgba(74, 158, 99, 0.05)";
-  const t = Math.pow(Math.min(count / max, 1), 0.6);
-  const alpha = 0.05 + t * 0.82;
-  const r = Math.round(220 - t * 155);
-  const g = Math.round(237 - t * 70);
-  const b = Math.round(200 - t * 130);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
-function treeBorderColor(count: number, max: number): string {
-  if (max === 0) return "rgba(74, 158, 99, 0.2)";
-  const t = Math.min(count / max, 1);
-  return `rgba(74, 158, ${Math.round(60 + t * 40)}, ${0.15 + t * 0.55})`;
-}
+const MAX_PER_COMMUNE = 2000; // Sécurité par code INSEE
+const CODE_INSEE_LIST = [
+  "33449","33063","33281","33318","33376","33056","33004","33273","33003","33550",
+  "33312","33192","33519","33487","33075","33162","33434","33039","33032","33200",
+  "33167","33065","33522","33013","33249","33119","33069","33096",
+];
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -62,7 +35,6 @@ export default function BordeauxMap() {
   const [loading, setLoading] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
-  const [maxTrees, setMaxTrees] = useState(1);
   const [totalZones, setTotalZones] = useState(0);
 
   // ── Map init ────────────────────────────────────────────────────────────────
@@ -113,98 +85,67 @@ export default function BordeauxMap() {
 
     try {
       const L = await import("leaflet");
-      const allFeatures: GeoJSON.Feature<GeoJSON.Geometry, VegetationProperties>[] = [];
-      let offset = 0;
-      let totalCount: number | null = null;
+      const allFeatures: GeoJSON.Feature[] = [];
 
-      while (true) {
-        const url = new URL(`${DATAHUB_BASE}/${VEGETATION_DATASET}/records`);
-        url.searchParams.set("limit", String(PAGE_SIZE));
-        url.searchParams.set("offset", String(offset));
-        url.searchParams.set("select", "geo_shape,nb_arbre,nom,code_insee");
-        url.searchParams.set("order_by", "nb_arbre DESC");
+      for (let i = 0; i < CODE_INSEE_LIST.length; i++) {
+        const insee = CODE_INSEE_LIST[i];
+        setStatus(`Chargement commune ${i + 1}/${CODE_INSEE_LIST.length}…`);
+        let offset = 0;
 
-        const res = await fetch(url.toString());
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        while (offset < MAX_PER_COMMUNE) {
+          const url = new URL(`${DATAHUB_BASE}/${VEGETATION_DATASET}/records`);
+          url.searchParams.set("limit", String(PAGE_SIZE));
+          url.searchParams.set("offset", String(offset));
+          url.searchParams.set("refine", `insee:"${insee}"`);
 
-        const data = await res.json();
+          const res = await fetch(url.toString());
+          if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
 
-        if (totalCount === null) {
-          totalCount = data.total_count ?? 0;
+          const data = await res.json();
+          const raw = data.results as DatahubRecord[];
+
+          const pageFeatures = raw
+            .map((rec) => {
+              const geoShape = rec.geo_shape;
+              if (!geoShape) return null;
+              const geometry: GeoJSON.Geometry = geoShape.geometry ?? geoShape;
+              if (!geometry?.type) return null;
+              return { type: "Feature" as const, geometry, properties: rec };
+            })
+            .filter(Boolean) as GeoJSON.Feature[];
+
+          allFeatures.push(...pageFeatures);
+          offset += PAGE_SIZE;
+
+          if (raw.length < PAGE_SIZE) break;
         }
-
-        const pageFeatures = (data.results as DatahubRecord[])
-          .map((rec) => {
-            const geometry =
-              rec.geo_shape?.geometry ??
-              (rec.geo_shape?.type ? (rec.geo_shape as unknown as GeoJSON.Geometry) : null);
-
-            if (!geometry) return null;
-
-            return {
-              type: "Feature" as const,
-              geometry,
-              properties: {
-                nb_arbre: rec.nb_arbre ?? 0,
-                nom: rec.nom ?? "",
-                code_insee: rec.code_insee ?? "",
-              },
-            };
-          })
-          .filter(Boolean) as GeoJSON.Feature<GeoJSON.Geometry, VegetationProperties>[];
-
-        allFeatures.push(...pageFeatures);
-        offset += PAGE_SIZE;
-
-        const pct = totalCount > 0 ? Math.round((allFeatures.length / totalCount) * 100) : "…";
-        setStatus(`Chargement… ${pct}%`);
-
-        if ((data.results as DatahubRecord[]).length < PAGE_SIZE) break;
-        if (allFeatures.length >= Math.min(totalCount ?? MAX_RECORDS, MAX_RECORDS)) break;
       }
 
-      const max = Math.max(...allFeatures.map((f) => f.properties.nb_arbre), 1);
-      setMaxTrees(max);
+      console.log(`[Végétation] Total features chargées: ${allFeatures.length}`);
       setTotalZones(allFeatures.length);
 
       const geoLayer = L.geoJSON(
         { type: "FeatureCollection", features: allFeatures },
         {
-          style: (feature) => {
-            const count = (feature?.properties as VegetationProperties).nb_arbre ?? 0;
-            return {
-              fillColor: treeCountToColor(count, max),
-              fillOpacity: 1,
-              color: treeBorderColor(count, max),
-              weight: 0.8,
-            };
-          },
+          style: () => ({
+            fillColor: "#52b788",
+            fillOpacity: 0.5,
+            color: "#2d6a4f",
+            weight: 1,
+          }),
           onEachFeature: (feature, layer) => {
-            const p = feature.properties as VegetationProperties;
-            const fillColor = treeCountToColor(p.nb_arbre, max);
-
             layer.on("mouseover", () => {
-              (layer as L.Path).setStyle({ weight: 2, color: "rgba(74,158,99,0.9)", fillOpacity: 1 });
+              (layer as L.Path).setStyle({ weight: 2, color: "#1b4332", fillOpacity: 0.8 });
             });
             layer.on("mouseout", () => {
-              (layer as L.Path).setStyle({
-                fillColor,
-                color: treeBorderColor(p.nb_arbre, max),
-                weight: 0.8,
-                fillOpacity: 1,
-              });
+              (layer as L.Path).setStyle({ fillColor: "#52b788", color: "#2d6a4f", weight: 1, fillOpacity: 0.5 });
             });
-            layer.bindPopup(`
-              <div style="font-family: system-ui; min-width: 160px;">
-                <div style="font-size: 18px; font-weight: 600; color: #2d6a4f; margin-bottom: 8px;">
-                  ${p.nb_arbre.toLocaleString("fr-FR")} arbres
-                </div>
-                <div style="font-size: 13px; color: #555; line-height: 1.7;">
-                  ${p.nom ? `<div><b>Zone :</b> ${p.nom}</div>` : ""}
-                  ${p.code_insee ? `<div><b>INSEE :</b> ${p.code_insee}</div>` : ""}
-                </div>
-              </div>
-            `);
+            const props = feature.properties ?? {};
+            const rows = Object.entries(props)
+              .filter(([k]) => k !== "geo_shape")
+              .map(([k, v]) => `<div><b>${k}:</b> ${v}</div>`)
+              .join("");
+            if (rows) layer.bindPopup(`<div style="font-family:system-ui;font-size:12px;max-height:200px;overflow:auto">${rows}</div>`);
           },
         }
       );
@@ -309,11 +250,10 @@ export default function BordeauxMap() {
       {/* ── Legend ── */}
       {vegVisible && !loading && (
         <div className="map-legend">
-          <p className="legend-title">Arbres par zone</p>
-          <div className="legend-gradient" />
-          <div className="legend-labels">
-            <span>0</span>
-            <span>{maxTrees.toLocaleString("fr-FR")}</span>
+          <p className="legend-title">Végétation urbaine</p>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ width: 16, height: 16, background: "#52b788", border: "1px solid #2d6a4f", borderRadius: 3 }} />
+            <span style={{ fontSize: 12, color: "#555" }}>{totalZones} zones</span>
           </div>
         </div>
       )}
