@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "next lint",
     "db:generate": "prisma generate",
@@ -12,24 +12,24 @@
     "db:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
-    "next": "^14.2.0",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
-    "leaflet": "^1.9.4",
     "@prisma/client": "^5.13.0",
-    "pg": "^8.11.0"
+    "leaflet": "^1.9.4",
+    "next": "^16.2.2",
+    "pg": "^8.11.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
   },
   "devDependencies": {
+    "@types/leaflet": "^1.9.12",
     "@types/node": "^20.0.0",
+    "@types/pg": "^8.11.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
-    "@types/leaflet": "^1.9.12",
-    "@types/pg": "^8.11.0",
-    "typescript": "^5.4.0",
-    "tailwindcss": "^3.4.0",
-    "postcss": "^8.4.0",
     "autoprefixer": "^10.4.0",
+    "postcss": "^8.4.0",
     "prisma": "^5.13.0",
-    "tsx": "^4.0.0"
+    "tailwindcss": "^3.4.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.4.0"
   }
 }
