@@ -548,7 +548,7 @@ export default function BordeauxMap() {
 
       <style>{`
         .bordeaux-map-wrapper {
-          position: relative; width: 100%; height: 100vh;
+          position: relative; width: 100%; height: 100%;
           display: flex; flex-direction: column;
           font-family: 'DM Sans', system-ui, sans-serif;
           background: #f7f6f2;
