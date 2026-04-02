@@ -7,34 +7,44 @@ import { useEffect, useRef, useState, useCallback } from "react";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DatahubRecord = Record<string, any>;
 
+type FeatureCollectionWithMeta = GeoJSON.FeatureCollection & {
+  meta?: {
+    displayedCount: number;
+    totalMatching: number;
+    simplified: boolean;
+  };
+};
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const BORDEAUX_CENTER: [number, number] = [44.8378, -0.5792];
-const BORDEAUX_ZOOM = 12;
-
-const DATAHUB_BASE =
-  `https://datahub.bordeaux-metropole.fr/api/explore/v2.1/catalog/datasets`;
-
-const VEGETATION_DATASET = "met_vegetation_urbaine";
-const HEAT_DATASET = "ri_icu_ifu_s";
-const FOUNTAINS_DATASET = "bor_fontaines_eau_potable";
-
-const PAGE_SIZE = 100;
-const MAX_PER_COMMUNE = 2000; // Sécurité par code INSEE
-const CODE_INSEE_LIST = [
-  "33449","33063","33281","33318","33376","33056","33004","33273","33003","33550",
-  "33312","33192","33519","33487","33075","33162","33434","33039","33032","33200",
-  "33167","33065","33522","33013","33249","33119","33069","33096",
+const BORDEAUX_ZOOM = 13;
+const BORDEAUX_MIN_ZOOM = 11;
+const BORDEAUX_MAX_ZOOM = 18;
+const BORDEAUX_MAX_BOUNDS: [[number, number], [number, number]] = [
+  [44.67, -0.92],
+  [45.01, -0.30],
 ];
+
+// LOD (Level of Detail) thresholds
+const LOD_THRESHOLDS = {
+  LOW_ZOOM: 11,
+  MEDIUM_ZOOM: 13,
+  HIGH_ZOOM: 15,
+};
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function BordeauxMap() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const vegetationLayerRef = useRef<L.GeoJSON | null>(null);
-  const heatLayerRef = useRef<L.GeoJSON | null>(null);
-  const fountainsLayerRef = useRef<L.LayerGroup | null>(null);
+  const canvasRendererRef = useRef<L.Renderer | null>(null);
+  const vegetationLayerRef = useRef<L.Layer | null>(null);
+  const heatLayerRef = useRef<L.Layer | null>(null);
+  const fountainsLayerRef = useRef<L.Layer | null>(null);
+  const vegetationRequestIdRef = useRef(0);
+  const heatRequestIdRef = useRef(0);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [vegVisible, setVegVisible] = useState(false);
   const [heatVisible, setHeatVisible] = useState(false);
@@ -52,6 +62,36 @@ export default function BordeauxMap() {
   const [totalZones, setTotalZones] = useState(0);
   const [heatZones, setHeatZones] = useState(0);
   const [fountainsCount, setFountainsCount] = useState(0);
+
+  const [currentZoom, setCurrentZoom] = useState(BORDEAUX_ZOOM);
+
+  const buildViewportQuery = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return "";
+
+    const bounds = map.getBounds();
+    const zoom = map.getZoom();
+    const bbox = [
+      bounds.getWest(),
+      bounds.getSouth(),
+      bounds.getEast(),
+      bounds.getNorth(),
+    ].join(",");
+
+    return `?bbox=${encodeURIComponent(bbox)}&zoom=${encodeURIComponent(String(zoom))}`;
+  }, []);
+
+  const replaceLayer = useCallback((current: { current: L.Layer | null }, next: L.Layer | null, shouldDisplay: boolean) => {
+    if (mapRef.current && current.current) {
+      mapRef.current.removeLayer(current.current);
+    }
+
+    current.current = next;
+
+    if (mapRef.current && next && shouldDisplay) {
+      next.addTo(mapRef.current);
+    }
+  }, []);
 
   // ── Layer management ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -86,7 +126,6 @@ export default function BordeauxMap() {
       setStatus(null);
     }
   }, [vegVisible, heatVisible, fountainsVisible, dataLoaded, heatDataLoaded, fountainsDataLoaded, totalZones, heatZones, fountainsCount]);
-
   // ── Map init ────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (mapRef.current || !mapContainerRef.current) return;
@@ -106,10 +145,17 @@ export default function BordeauxMap() {
         center: BORDEAUX_CENTER,
         zoom: BORDEAUX_ZOOM,
         zoomControl: false,
+        preferCanvas: true,
+        minZoom: BORDEAUX_MIN_ZOOM,
+        maxZoom: BORDEAUX_MAX_ZOOM,
+        maxBounds: BORDEAUX_MAX_BOUNDS,
+        maxBoundsViscosity: 1,
       });
 
+      canvasRendererRef.current = L.canvas({ padding: 0.5 });
+
       L.tileLayer(
-        "https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png",
+        "https://tiles.stadiamaps.com/tiles/alidade_bright/{z}/{x}/{y}{r}.png",
         {
           attribution:
             '&copy; <a href="https://stadiamaps.com/">Stadia Maps</a>, &copy; <a href="https://openmaptiles.org/">OpenMapTiles</a>, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
@@ -129,90 +175,59 @@ export default function BordeauxMap() {
   }, []);
 
   // ── Data fetching ───────────────────────────────────────────────────────────
-  const fetchVegetation = useCallback(async () => {
+  const fetchVegetation = useCallback(async (forceReload = false) => {
     setLoading(true);
     setStatus("Chargement des données…");
 
+    const requestId = ++vegetationRequestIdRef.current;
+
     try {
       const L = await import("leaflet");
-      const allFeatures: GeoJSON.Feature[] = [];
 
-      for (let i = 0; i < CODE_INSEE_LIST.length; i++) {
-        const insee = CODE_INSEE_LIST[i];
-        setStatus(`Chargement commune ${i + 1}/${CODE_INSEE_LIST.length}…`);
-        let offset = 0;
+      const res = await fetch(`/api/heatmap/vegetation/geojson${buildViewportQuery()}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
 
-        while (offset < MAX_PER_COMMUNE) {
-          const url = new URL(`${DATAHUB_BASE}/${VEGETATION_DATASET}/records`);
-          url.searchParams.set("limit", String(PAGE_SIZE));
-          url.searchParams.set("offset", String(offset));
-          url.searchParams.set("refine", `insee:"${insee}"`);
+      const geoJson: FeatureCollectionWithMeta = await res.json();
+      if (requestId !== vegetationRequestIdRef.current) return;
 
-          const res = await fetch(url.toString());
-          if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      console.log(`[Végétation] Features chargées: ${geoJson.features.length}`);
+      setTotalZones(geoJson.meta?.totalMatching ?? geoJson.features.length);
+      const layer = L.geoJSON(geoJson, {
+        style: (feature) => {
+          const nbArbre = feature?.properties ? (feature.properties as DatahubRecord)?.nb_arbre : null;
+          return {
+            ...getVegetationStyle(nbArbre),
+            renderer: canvasRendererRef.current ?? undefined,
+          };
+        },
+        onEachFeature: (feature, layerItem) => {
+          const props = feature.properties ?? {};
+          const rows = Object.entries(props)
+            .filter(([k]) => k !== "geo_shape")
+            .map(([k, v]) => `<div><b>${k}:</b> ${v}</div>`)
+            .join("");
+          if (rows) {
+            layerItem.bindPopup(`<div style="font-family:system-ui;font-size:12px;max-height:200px;overflow:auto">${rows}</div>`);
+          }
+        },
+      });
 
-          const data = await res.json();
-          const raw = data.results as DatahubRecord[];
-
-          const pageFeatures = raw
-            .map((rec) => {
-              const geoShape = rec.geo_shape;
-              if (!geoShape) return null;
-              const geometry: GeoJSON.Geometry = geoShape.geometry ?? geoShape;
-              if (!geometry?.type) return null;
-              return { type: "Feature" as const, geometry, properties: rec };
-            })
-            .filter(Boolean) as GeoJSON.Feature[];
-
-          allFeatures.push(...pageFeatures);
-          offset += PAGE_SIZE;
-
-          if (raw.length < PAGE_SIZE) break;
-        }
-      }
-
-      console.log(`[Végétation] Total features chargées: ${allFeatures.length}`);
-      setTotalZones(allFeatures.length);
-
-      const geoLayer = L.geoJSON(
-        allFeatures,
-        {
-          style: (feature) => {
-            const nbArbre = feature && feature.properties ? (feature.properties as DatahubRecord)?.nb_arbre : null;
-            return getVegetationStyle(nbArbre);
-          },
-          onEachFeature: (feature, layer) => {
-            const nbArbre = feature && feature.properties ? (feature.properties as DatahubRecord)?.nb_arbre : null;
-            const baseStyle = getVegetationStyle(nbArbre);
-
-            layer.on("mouseover", () => {
-              (layer as L.Path).setStyle({ ...baseStyle, weight: 2, color: "#1b4332", fillOpacity: Math.min(0.8, (baseStyle.fillOpacity as number) + 0.2) });
-            });
-            layer.on("mouseout", () => {
-              (layer as L.Path).setStyle(baseStyle);
-            });
-            const props = feature.properties ?? {};
-            const rows = Object.entries(props)
-              .filter(([k]) => k !== "geo_shape")
-              .map(([k, v]) => `<div><b>${k}:</b> ${v}</div>`)
-              .join("");
-            if (rows) layer.bindPopup(`<div style="font-family:system-ui;font-size:12px;max-height:200px;overflow:auto">${rows}</div>`);
-          },
-        }
-      );
-
-      vegetationLayerRef.current = geoLayer;
+      replaceLayer(vegetationLayerRef, layer, vegVisible || forceReload);
       setDataLoaded(true);
-      setStatus(`${allFeatures.length} zones chargées`);
-
-      // La couche sera ajoutée/retirée par le useEffect selon vegVisible
+      setStatus(
+        geoJson.meta?.simplified
+          ? `${geoJson.meta.displayedCount} / ${geoJson.meta.totalMatching} zones affichees`
+          : `${geoJson.features.length} zones affichees`
+      );
     } catch (err) {
       console.error("Erreur chargement végétation:", err);
       setStatus("Erreur de chargement — voir console");
     } finally {
-      setLoading(false);
+      if (requestId === vegetationRequestIdRef.current) {
+        setLoading(false);
+      }
     }
-  }, []);
+  }, [buildViewportQuery, replaceLayer, vegVisible]);
 
   const getHeatColor = (delta: number | null): string => {
     if (delta === null || delta === undefined || Number.isNaN(delta)) return "#999";
@@ -236,7 +251,7 @@ export default function BordeauxMap() {
 
     const maxCount = 250;
     const ratio = Math.min(1, count / maxCount);
-    const opacity = 0.08 + ratio * 0.5; // 0.08 -> 0.58 (plus transparent)
+    const opacity = currentZoom <= LOD_THRESHOLDS.MEDIUM_ZOOM ? 0.06 + ratio * 0.28 : 0.08 + ratio * 0.42;
     const lightness = 70 - ratio * 40; // 70% -> 30%
     const fillColor = `hsl(140, 70%, ${lightness}%)`;
 
@@ -249,93 +264,63 @@ export default function BordeauxMap() {
   };
 
   const fetchHeatIslands = useCallback(async () => {
+    const requestId = ++heatRequestIdRef.current;
     setHeatLoading(true);
     setStatus("Chargement îlots de chaleur/fraicheur…");
 
     try {
       const L = await import("leaflet");
-      const allFeatures: GeoJSON.Feature[] = [];
 
-      for (let i = 0; i < CODE_INSEE_LIST.length; i++) {
-        const insee = CODE_INSEE_LIST[i];
-        setStatus(`Chargement commune ${i + 1}/${CODE_INSEE_LIST.length}…`);
-        let offset = 0;
+      const res = await fetch(`/api/heatmap/source/geojson${buildViewportQuery()}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
 
-        while (offset < MAX_PER_COMMUNE) {
-          const url = new URL(`${DATAHUB_BASE}/${HEAT_DATASET}/records`);
-          url.searchParams.set("limit", String(PAGE_SIZE));
-          url.searchParams.set("offset", String(offset));
-          url.searchParams.set("refine", `insee:"${insee}"`);
+      const geoJson: FeatureCollectionWithMeta = await res.json();
+      if (requestId !== heatRequestIdRef.current) return;
 
-          const res = await fetch(url.toString());
-          if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      console.log(`[Îlots de chaleur] Features chargées: ${geoJson.features.length}`);
+      setHeatZones(geoJson.meta?.totalMatching ?? geoJson.features.length);
+      const layer = L.geoJSON(geoJson, {
+        style: (feature) => {
+          const delta = feature?.properties ? (feature.properties as DatahubRecord)?.delta : null;
+          const diff = delta != null ? Number(delta) : null;
+          const color = getHeatColor(diff);
+          const fillOpacity = currentZoom <= LOD_THRESHOLDS.MEDIUM_ZOOM ? 0.22 : 0.3;
+          return {
+            color,
+            fillColor: color,
+            fillOpacity,
+            weight: currentZoom <= LOD_THRESHOLDS.MEDIUM_ZOOM ? 0.7 : 1,
+            renderer: canvasRendererRef.current ?? undefined,
+          };
+        },
+        onEachFeature: (feature, layerItem) => {
+          const props = feature.properties ?? {};
+          const rows = Object.entries(props)
+            .filter(([k]) => k !== "geo_shape")
+            .map(([k, v]) => `<div><b>${k}:</b> ${v}</div>`)
+            .join("");
+          if (rows) {
+            layerItem.bindPopup(`<div style="font-family:system-ui;font-size:12px;max-height:200px;overflow:auto">${rows}</div>`);
+          }
+        },
+      });
 
-          const data = await res.json();
-          const raw = data.results as DatahubRecord[];
-
-          const pageFeatures = raw
-            .map((rec) => {
-              const geoShape = rec.geo_shape;
-              if (!geoShape) return null;
-              const geometry: GeoJSON.Geometry = geoShape.geometry ?? geoShape;
-              if (!geometry?.type) return null;
-              return { type: "Feature" as const, geometry, properties: rec };
-            })
-            .filter(Boolean) as GeoJSON.Feature[];
-
-          allFeatures.push(...pageFeatures);
-          offset += PAGE_SIZE;
-
-          if (raw.length < PAGE_SIZE) break;
-        }
-      }
-
-      console.log(`[Îlots de chaleur] Total features chargées: ${allFeatures.length}`);
-      setHeatZones(allFeatures.length);
-
-      const geoLayer = L.geoJSON(
-        allFeatures,
-        {
-          style: (feature) => {
-            const delta = (feature && feature.properties ? (feature.properties as DatahubRecord)?.delta : null);
-            const diff = delta != null ? Number(delta) : null;
-            return {
-              fillColor: getHeatColor(diff),
-              fillOpacity: 0.4, // Plus transparent
-              color: "#5a5a5a",
-              weight: 1,
-            };
-          },
-          onEachFeature: (feature, layer) => {
-            layer.on("mouseover", () => {
-              (layer as L.Path).setStyle({ weight: 2, color: "#333", fillOpacity: 0.7 });
-            });
-            layer.on("mouseout", () => {
-              (layer as L.Path).setStyle({ fillOpacity: 0.4, color: "#5a5a5a", weight: 1 });
-            });
-            const props = feature.properties ?? {};
-            const rows = Object.entries(props)
-              .filter(([k]) => k !== "geo_shape")
-              .map(([k, v]) => `<div><b>${k}:</b> ${v}</div>`)
-              .join("");
-            if (rows)
-              layer.bindPopup(`<div style="font-family:system-ui;font-size:12px;max-height:200px;overflow:auto">${rows}</div>`);
-          },
-        }
-      );
-
-      heatLayerRef.current = geoLayer;
+      replaceLayer(heatLayerRef, layer, heatVisible);
       setHeatDataLoaded(true);
-      setStatus(`${allFeatures.length} zones de chaleur/fraicheur chargées`);
-
-      // La couche sera ajoutée/retirée par le useEffect selon heatVisible
+      setStatus(
+        geoJson.meta?.simplified
+          ? `${geoJson.meta.displayedCount} / ${geoJson.meta.totalMatching} zones affichees`
+          : `${geoJson.features.length} zones de chaleur/fraicheur affichees`
+      );
     } catch (err) {
       console.error("Erreur chargement îlots de chaleur:", err);
       setStatus("Erreur de chargement — voir console");
     } finally {
-      setHeatLoading(false);
+      if (requestId === heatRequestIdRef.current) {
+        setHeatLoading(false);
+      }
     }
-  }, []);
+  }, [buildViewportQuery, currentZoom, heatVisible, replaceLayer]);
 
   const fetchFountains = useCallback(async () => {
     setFountainsLoading(true);
@@ -343,60 +328,49 @@ export default function BordeauxMap() {
 
     try {
       const L = await import("leaflet");
+
+      // Use the new backend API instead of direct DataHub calls
+      const res = await fetch("/api/heatmap/fountains/geojson");
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+
+      const geoJson: GeoJSON.FeatureCollection = await res.json();
+
       const layerGroup = L.layerGroup();
 
-      let offset = 0;
-      const maxRecords = 5000; // Limite de sécurité
+      for (const feature of geoJson.features) {
+        if (feature.geometry.type === "Point" && feature.geometry.coordinates) {
+          const [lng, lat] = feature.geometry.coordinates;
+          const marker = L.circleMarker([lat, lng], {
+            color: "#0066cc",
+            fillColor: "#0099ff",
+            fillOpacity: 0.8,
+            radius: 6,
+            weight: 2,
+          });
 
-      while (offset < maxRecords) {
-        const url = new URL(`${DATAHUB_BASE}/${FOUNTAINS_DATASET}/records`);
-        url.searchParams.set("limit", String(PAGE_SIZE));
-        url.searchParams.set("offset", String(offset));
+          marker.on("mouseover", () => {
+            marker.setStyle({ radius: 8, fillOpacity: 1 });
+          });
+          marker.on("mouseout", () => {
+            marker.setStyle({ radius: 6, fillOpacity: 0.8 });
+          });
 
-        const res = await fetch(url.toString());
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-
-        const data = await res.json();
-        const raw = data.results as DatahubRecord[];
-
-        for (const rec of raw) {
-          if (rec.geom && rec.geom.lat && rec.geom.lon) {
-            const marker = L.circleMarker([rec.geom.lat, rec.geom.lon], {
-              color: "#0066cc",
-              fillColor: "#0099ff",
-              fillOpacity: 0.8,
-              radius: 6,
-              weight: 2,
-            });
-
-            marker.on("mouseover", () => {
-              marker.setStyle({ radius: 8, fillOpacity: 1 });
-            });
-            marker.on("mouseout", () => {
-              marker.setStyle({ radius: 6, fillOpacity: 0.8 });
-            });
-
-            const props = Object.entries(rec)
-              .filter(([k]) => k !== "geom")
-              .map(([k, v]) => `<div><b>${k}:</b> ${v}</div>`)
-              .join("");
-            if (props) {
-              marker.bindPopup(`<div style="font-family:system-ui;font-size:12px;max-height:200px;overflow:auto">${props}</div>`);
-            }
-
-            layerGroup.addLayer(marker);
+          const props = Object.entries(feature.properties || {})
+            .map(([k, v]) => `<div><b>${k}:</b> ${v}</div>`)
+            .join("");
+          if (props) {
+            marker.bindPopup(`<div style="font-family:system-ui;font-size:12px;max-height:200px;overflow:auto">${props}</div>`);
           }
-        }
 
-        offset += PAGE_SIZE;
-        if (raw.length < PAGE_SIZE) break;
+          layerGroup.addLayer(marker);
+        }
       }
 
       const markers = layerGroup.getLayers();
       console.log(`[Fontaines] Total markers créés: ${markers.length}`);
       setFountainsCount(markers.length);
 
-      fountainsLayerRef.current = layerGroup;
+      replaceLayer(fountainsLayerRef, layerGroup, fountainsVisible);
       setFountainsDataLoaded(true);
       setStatus(`${markers.length} fontaines chargées`);
 
@@ -407,29 +381,63 @@ export default function BordeauxMap() {
     } finally {
       setFountainsLoading(false);
     }
-  }, []);
+  }, [fountainsVisible, replaceLayer]);
+
+  // ── Zoom / pan handler for viewport loading ────────────────────────────────
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    const handleViewportChange = () => {
+      const zoom = mapRef.current!.getZoom();
+      setCurrentZoom(zoom);
+
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+      }
+
+      refreshTimerRef.current = setTimeout(() => {
+        if (vegVisible) {
+          void fetchVegetation(true);
+        }
+        if (heatVisible) {
+          void fetchHeatIslands();
+        }
+      }, 120);
+    };
+
+    mapRef.current.on("moveend", handleViewportChange);
+    mapRef.current.on("zoomend", handleViewportChange);
+
+    return () => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+      }
+      mapRef.current?.off("moveend", handleViewportChange);
+      mapRef.current?.off("zoomend", handleViewportChange);
+    };
+  }, [vegVisible, heatVisible, fetchVegetation, fetchHeatIslands]);
 
   // ── Toggle handler ──────────────────────────────────────────────────────────
   const handleToggleVegetation = useCallback(async () => {
     if (!dataLoaded) {
       await fetchVegetation();
     }
-    setVegVisible(!vegVisible);
-  }, [dataLoaded, vegVisible, fetchVegetation]);
+    setVegVisible((visible) => !visible);
+  }, [dataLoaded, fetchVegetation]);
 
   const handleToggleHeat = useCallback(async () => {
     if (!heatDataLoaded) {
       await fetchHeatIslands();
     }
-    setHeatVisible(!heatVisible);
-  }, [heatDataLoaded, heatVisible, fetchHeatIslands]);
+    setHeatVisible((visible) => !visible);
+  }, [heatDataLoaded, fetchHeatIslands]);
 
   const handleToggleFountains = useCallback(async () => {
     if (!fountainsDataLoaded) {
       await fetchFountains();
     }
-    setFountainsVisible(!fountainsVisible);
-  }, [fountainsDataLoaded, fountainsVisible, fetchFountains]);
+    setFountainsVisible((visible) => !visible);
+  }, [fountainsDataLoaded, fetchFountains]);
 
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -588,6 +596,65 @@ export default function BordeauxMap() {
         .legend-labels { display: flex; justify-content: space-between; font-size: 11px; color: #888; }
         .leaflet-popup-content-wrapper { border-radius: 10px !important; box-shadow: 0 4px 20px rgba(0,0,0,0.12) !important; border: 1px solid rgba(0,0,0,0.06) !important; }
         .leaflet-popup-content { margin: 14px 16px !important; }
+
+        /* Cluster styles */
+        .vegetation-cluster-icon {
+          background: transparent !important;
+          border: none !important;
+        }
+        .vegetation-cluster {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 100%;
+          height: 100%;
+          border-radius: 50%;
+          font-size: 12px;
+          font-weight: 600;
+          color: white;
+          text-shadow: 1px 1px 1px rgba(0,0,0,0.5);
+        }
+        .vegetation-cluster-small {
+          background: linear-gradient(135deg, #52b788, #2d6a4f);
+          box-shadow: 0 2px 8px rgba(45,106,79,0.4);
+        }
+        .vegetation-cluster-medium {
+          background: linear-gradient(135deg, #40916c, #1b4332);
+          box-shadow: 0 3px 12px rgba(27,67,50,0.5);
+        }
+        .vegetation-cluster-large {
+          background: linear-gradient(135deg, #2d6a4f, #081c15);
+          box-shadow: 0 4px 16px rgba(8,28,21,0.6);
+        }
+
+        .heat-cluster-icon {
+          background: transparent !important;
+          border: none !important;
+        }
+        .heat-cluster {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 100%;
+          height: 100%;
+          border-radius: 50%;
+          font-size: 12px;
+          font-weight: 600;
+          color: white;
+          text-shadow: 1px 1px 1px rgba(0,0,0,0.5);
+        }
+        .heat-cluster-small {
+          background: linear-gradient(135deg, #fb8b24, #e85d04);
+          box-shadow: 0 2px 8px rgba(232,93,4,0.4);
+        }
+        .heat-cluster-medium {
+          background: linear-gradient(135deg, #e85d04, #c1121f);
+          box-shadow: 0 3px 12px rgba(193,18,31,0.5);
+        }
+        .heat-cluster-large {
+          background: linear-gradient(135deg, #c1121f, #780000);
+          box-shadow: 0 4px 16px rgba(120,0,0,0.6);
+        }
       `}</style>
     </div>
   );

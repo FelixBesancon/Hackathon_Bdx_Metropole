@@ -16,6 +16,70 @@ model HeatZone {
   createdAt   DateTime @default(now())
 }
 
+model HeatSourceFeature {
+  id         Int      @id @default(autoincrement())
+  sourceId   String   @unique
+  geometry   Json
+  properties Json
+  minLng     Float
+  minLat     Float
+  maxLng     Float
+  maxLat     Float
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([minLng, maxLng])
+  @@index([minLat, maxLat])
+}
+
+model VegetationFeature {
+  id         Int      @id @default(autoincrement())
+  sourceId   String   @unique
+  geometry   Json
+  properties Json
+  minLng     Float
+  minLat     Float
+  maxLng     Float
+  maxLat     Float
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([minLng, maxLng])
+  @@index([minLat, maxLat])
+}
+
+model FountainFeature {
+  id         Int      @id @default(autoincrement())
+  sourceId   String   @unique
+  datasetId  String
+  geometry   Json
+  properties Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([datasetId])
+}
+
+model DatasetSyncState {
+  datasetKey        String            @id
+  signature         String?
+  remoteModified    String?
+  remoteProcessed   String?
+  remoteRecords     Int?
+  lastAttemptAt     DateTime?
+  lastSuccessAt     DateTime?
+  lastStatus        DatasetSyncStatus @default(IDLE)
+  lastError         String?
+  updatedAt         DateTime          @updatedAt
+}
+
+enum DatasetSyncStatus {
+  IDLE
+  RUNNING
+  SUCCESS
+  ERROR
+}
+
 model CitizenAction {
   id        Int        @id @default(autoincrement())
   type      ActionType

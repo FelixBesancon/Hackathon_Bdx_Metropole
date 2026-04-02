@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import router from "./routes";
+import { startBackgroundSync } from "./services/data-sync.service";
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -16,4 +17,5 @@ app.get("/health", (_req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Backend démarré sur http://localhost:${PORT}`);
+  startBackgroundSync();
 });

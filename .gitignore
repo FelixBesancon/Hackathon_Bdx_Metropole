@@ -7,3 +7,6 @@
 .DS_Store
 *.log
 *.tmp
+*.d.ts
+.next
+.env.local
