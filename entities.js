@@ -190,7 +190,7 @@ const Entities = (() => {
     el.addEventListener('mousemove',  e => UI.moveTooltip(e));
 
     layer.appendChild(el);
-    if (animate) spawnSparkles(f.mx, f.my, '💧');
+    if (animate) spawnSparklesFountain(f.mx, f.my, '💧');
   }
 
   // ── Particules ────────────────────────────────────────
@@ -198,6 +198,18 @@ const Entities = (() => {
     const layer = document.getElementById('tree-layer');
     const sparks = ['✨','🍃','💚','🌿','⭐'];
     [emoji, ...sparks].slice(0,5).forEach((e, i) => {
+      const s = document.createElement('div');
+      s.style.cssText = `position:absolute;left:${mx-20+Math.random()*40}px;top:${my-50+Math.random()*30}px;font-size:13px;animation:spark .7s ease-out ${i*0.08}s forwards;z-index:30;pointer-events:none;`;
+      s.textContent = e;
+      layer.appendChild(s);
+      setTimeout(() => s.remove(), 900);
+    });
+  }
+
+  function spawnSparklesFountain(mx, my, emoji='💧') {
+    const layer = document.getElementById('tree-layer');
+    const sparksFountain = ['✨','💧','🌊', '⭐'];
+    [emoji, ...sparksFountain].slice(0,5).forEach((e, i) => {
       const s = document.createElement('div');
       s.style.cssText = `position:absolute;left:${mx-20+Math.random()*40}px;top:${my-50+Math.random()*30}px;font-size:13px;animation:spark .7s ease-out ${i*0.08}s forwards;z-index:30;pointer-events:none;`;
       s.textContent = e;

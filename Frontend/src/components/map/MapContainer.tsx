@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
+import PixelMap from "./pixel-map/PixelMap";
 
 // Leaflet requires browser APIs — disable SSR
 const BordeauxMap = dynamic(() => import("./BordeauxMap"), {
@@ -207,6 +208,8 @@ export default function MapContainer() {
       {mode === "real" ? (
         <BordeauxMap />
       ) : (
+        <PixelMap />
+        /* Placeholder pour la carte pixel en développement * /
         <div style={{
           flex: 1,
           width: "100%",
@@ -243,6 +246,7 @@ export default function MapContainer() {
             </p>
           </div>
         </div>
+        */
       )}
     </div>
   );
