@@ -203,6 +203,11 @@ cd ../Frontend && npm install
 cd ..
 ```
 
+Note : après un `git pull`, si `package.json` ou `package-lock.json` a changé, relancer `npm install` dans le dossier concerné.
+
+Important : après un `git pull`, si `package.json` ou `package-lock.json` a changé (Backend ou Frontend), relancer `npm install` dans le dossier concerné.
+Sinon, une erreur du type `Cannot find module ...` peut apparaître au démarrage.
+
 ### 11.4. Créer les fichiers d’environnement
 
 Backend :

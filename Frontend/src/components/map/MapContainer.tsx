@@ -134,6 +134,29 @@ export default function MapContainer() {
         fontFamily: "'DM Sans', system-ui, sans-serif",
       }}>
         <button
+          onClick={() => setShowTutorial(true)}
+          title="Aide"
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: "50%",
+            background: "linear-gradient(135deg, #52b788 0%, #2d6a4f 100%)",
+            border: "1px solid rgba(27,67,50,0.55)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 14,
+            fontWeight: 700,
+            color: "#ffffff",
+            fontFamily: "'DM Sans', system-ui, sans-serif",
+            boxShadow: "0 2px 10px rgba(45,106,79,0.35)",
+            marginRight: 2,
+          }}
+        >
+          ?
+        </button>
+        <button
           onClick={() => setMode("real")}
           style={{
             padding: "6px 14px",
@@ -182,24 +205,6 @@ export default function MapContainer() {
           Carte pixel
         </button>
       </div>
-
-      {/* Help button */}
-      <button
-        onClick={() => setShowTutorial(true)}
-        title="Aide"
-        style={{
-          position: "absolute", top: 16, left: 16, zIndex: 1100,
-          width: 34, height: 34, borderRadius: "50%",
-          background: "rgba(255,255,255,0.96)", backdropFilter: "blur(12px)",
-          border: "1px solid rgba(0,0,0,0.08)", cursor: "pointer",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          boxShadow: "0 4px 20px rgba(0,0,0,0.10)",
-          fontSize: 15, fontWeight: 700, color: "#2d6a4f",
-          fontFamily: "'DM Sans', system-ui, sans-serif",
-        }}
-      >
-        ?
-      </button>
 
       {/* Tutorial popup */}
       {showTutorial && <TutorialPopup mode={mode} onClose={closeTutorial} />}
