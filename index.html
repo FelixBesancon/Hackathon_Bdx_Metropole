@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bordeaux Vert — Carte Écologique Interactive</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap');
+:root {
+  --g-dark:#1a3a1a; --g-mid:#2d5a27; --accent:#7ee84a; --accent2:#ffd700;
+  --panel:rgba(10,24,10,0.93); --border:rgba(126,232,74,0.28);
+  --text:#c8e6c0; --dim:#6a9a60; --red:#f05050;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#0a180a;color:var(--text);font-family:'VT323',monospace;font-size:18px;height:100vh;overflow:hidden;display:flex;flex-direction:column;}
+
+/* ── HEADER ── */
+header{display:flex;align-items:center;gap:10px;padding:7px 14px;background:var(--panel);border-bottom:2px solid var(--border);flex-shrink:0;backdrop-filter:blur(8px);}
+.logo{font-family:'Press Start 2P',monospace;font-size:10px;color:var(--accent);text-shadow:0 0 20px var(--accent);white-space:nowrap;}
+.logo span{color:var(--accent2);}
+.btn{font-family:'Press Start 2P',monospace;font-size:7px;background:var(--g-mid);border:2px solid rgba(126,232,74,0.35);color:var(--accent);padding:6px 9px;cursor:pointer;transition:all .15s;letter-spacing:.5px;}
+.btn:hover{background:var(--accent);color:var(--g-dark);box-shadow:0 0 14px rgba(126,232,74,0.5);}
+.btn.active{background:var(--accent);color:var(--g-dark);}
+.btn.fountain-btn.active{background:#58d0f0;color:#0a180a;border-color:#58d0f0;box-shadow:0 0 14px rgba(88,208,240,0.5);}
+.stat{display:flex;align-items:center;gap:5px;background:rgba(126,232,74,0.07);border:1px solid var(--border);padding:3px 10px;font-size:15px;}
+.stat .v{color:var(--accent);font-size:18px;}
+.stat.water-stat .v{color:#58d0f0;}
+.hstats{margin-left:auto;display:flex;gap:7px;}
+
+/* ── LAYOUT ── */
+.main{flex:1;display:flex;overflow:hidden;}
+
+/* ── MAP ── */
+#wrap{flex:1;position:relative;overflow:hidden;cursor:crosshair;background:#050e05;}
+#wrap.pan{cursor:grab;}
+#wrap.pan.drag{cursor:grabbing;}
+#map-canvas{position:absolute;top:0;left:0;image-rendering:pixelated;image-rendering:crisp-edges;transform-origin:0 0;}
+#tree-layer{position:absolute;top:0;left:0;transform-origin:0 0;pointer-events:none;z-index:10;}
+#wrap::after{content:'';position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.02) 3px,rgba(0,0,0,0.02) 4px);pointer-events:none;z-index:5;}
+
+/* ── ENTITÉS ── */
+@keyframes grow{
+  0%  {transform:scaleY(0) scaleX(0.2);opacity:0;filter:brightness(3);}
+  40% {transform:scaleY(1.12) scaleX(1.04);filter:brightness(1.5);}
+  70% {transform:scaleY(0.96);}
+  100%{transform:scaleY(1) scaleX(1);opacity:1;filter:brightness(1);}
+}
+
+@keyframes drop{
+  0%  {transform:scaleY(0.1) scaleX(0.3) translateY(-60px);opacity:0;filter:brightness(3) hue-rotate(180deg);}
+  45% {transform:scaleY(1.15) scaleX(0.9) translateY(4px);opacity:1;filter:brightness(1.6) hue-rotate(90deg);}
+  65% {transform:scaleY(0.92) scaleX(1.06) translateY(0);}
+  82% {transform:scaleY(1.04) scaleX(0.98);}
+  100%{transform:scaleY(1) scaleX(1) translateY(0);opacity:1;filter:brightness(1);}
+}
+.planted-fountain{animation:drop .75s cubic-bezier(.22,1,.36,1) forwards;}
+.planted-tree{animation:grow .85s cubic-bezier(.34,1.56,.64,1) forwards;}
+.entity-tree, .entity-fountain{position:absolute;pointer-events:all;cursor:pointer;transform-origin:bottom center;}
+.entity-tree img, .entity-fountain img{image-rendering:pixelated;display:block;}
+
+@keyframes spark{0%{opacity:0;transform:scale(0) translateY(0);}40%{opacity:1;transform:scale(1.4) translateY(-10px);}100%{opacity:0;transform:scale(.5) translateY(-35px);}}
+
+/* Pulse animation fontaine */
+@keyframes fountain-pulse{
+  0%,100%{filter:drop-shadow(0 0 3px #58d0f0);}
+  50%{filter:drop-shadow(0 0 8px #58d0f0);}
+}
+.entity-fountain img{animation:fountain-pulse 2s ease-in-out infinite;}
+
+/* ── SIDEBAR ── */
+.sidebar{width:268px;flex-shrink:0;background:var(--panel);border-left:2px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;backdrop-filter:blur(8px);}
+.sec{padding:13px;border-bottom:1px solid rgba(126,232,74,0.1);}
+.sec h3{font-family:'Press Start 2P',monospace;font-size:6px;color:var(--dim);letter-spacing:2px;margin-bottom:9px;text-transform:uppercase;}
+.tile-box{background:rgba(126,232,74,0.05);border:1px solid var(--border);padding:9px;font-size:16px;line-height:1.9;min-height:78px;}
+.tile-box .tt{font-family:'Press Start 2P',monospace;font-size:6px;color:var(--accent);margin-bottom:4px;}
+.badge{display:inline-block;border:1px solid var(--border);padding:1px 7px;font-size:12px;margin-top:3px;color:var(--accent);}
+.badge.no{color:var(--red);border-color:rgba(240,80,80,.3);}
+.big{font-family:'Press Start 2P',monospace;font-size:22px;color:var(--accent);text-shadow:0 0 18px var(--accent);display:block;text-align:center;margin:6px 0;}
+.big.water{color:#58d0f0;text-shadow:0 0 18px #58d0f0;}
+.pbar{height:6px;background:rgba(126,232,74,0.1);border:1px solid var(--border);margin:5px 0;overflow:hidden;}
+.pfill{height:100%;background:linear-gradient(90deg,var(--g-mid),var(--accent));transition:width .5s;}
+.pfill.water{background:linear-gradient(90deg,#1a4a5a,#58d0f0);}
+.eco-row{display:flex;justify-content:space-between;font-size:14px;padding:2px 0;}
+.eco-row span{color:var(--accent);}
+.eco-row span.water{color:#58d0f0;}
+.leg{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:14px;}
+.dot{width:12px;height:12px;flex-shrink:0;border:1px solid rgba(255,255,255,.1);}
+.tabs{display:flex;gap:4px;margin-bottom:10px;}
+.tab{flex:1;font-family:'Press Start 2P',monospace;font-size:6px;padding:5px;background:var(--g-dark);border:1px solid var(--border);color:var(--dim);cursor:pointer;text-align:center;}
+.tab.active{background:var(--g-mid);color:var(--accent);border-color:var(--accent);}
+.tab-panel{display:none;}
+.tab-panel.active{display:block;}
+
+/* ── TOOLTIP ── */
+#tip{position:fixed;background:var(--panel);border:1px solid var(--border);padding:9px 13px;font-size:15px;line-height:1.9;pointer-events:none;display:none;z-index:500;max-width:220px;backdrop-filter:blur(8px);}
+#tip-title{font-family:'Press Start 2P',monospace;font-size:6px;color:var(--accent);margin-bottom:4px;}
+
+/* ── STATUSBAR ── */
+.status{display:flex;align-items:center;gap:16px;padding:4px 14px;background:var(--panel);border-top:1px solid var(--border);font-size:14px;color:var(--dim);flex-shrink:0;}
+.status .sv{color:var(--text);}
+
+/* ── NOTIF ── */
+.notif{position:fixed;bottom:52px;left:50%;transform:translateX(-50%);background:var(--panel);border:2px solid var(--accent);padding:8px 20px;font-family:'Press Start 2P',monospace;font-size:7px;color:var(--accent);z-index:400;box-shadow:0 0 22px rgba(126,232,74,0.4);animation:nfade 2.4s ease-out forwards;pointer-events:none;white-space:nowrap;}
+@keyframes nfade{0%{opacity:0;transform:translateX(-50%) translateY(14px);}12%{opacity:1;transform:translateX(-50%) translateY(0);}78%{opacity:1;}100%{opacity:0;transform:translateX(-50%) translateY(-8px);}}
+
+/* ── LOADER ── */
+#loader{position:fixed;inset:0;background:#0a180a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:1000;}
+.ltitle{font-family:'Press Start 2P',monospace;font-size:13px;color:var(--accent);text-shadow:0 0 28px var(--accent);animation:blink 1s steps(1) infinite;}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+.lwrap{width:260px;height:6px;background:rgba(126,232,74,0.1);border:1px solid var(--border);}
+.lbar{height:100%;background:var(--accent);width:0%;transition:width .4s;}
+.lmsg{font-size:16px;color:var(--dim);}
+</style>
+</head>
+<body>
+
+<!-- TOOLTIP -->
+<div id="tip">
+  <div id="tip-title">—</div>
+  <div id="tip-content"></div>
+</div>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">BORDEAUX <span>VERT</span></div>
+  <button class="btn active"       id="btn-tree"     onclick="UI.setMode('tree')">🌱 ARBRE</button>
+  <button class="btn fountain-btn" id="btn-fountain"  onclick="UI.setMode('fountain')">⛲ FONTAINE</button>
+  <button class="btn"              id="btn-pan"       onclick="UI.setMode('pan')">✋ NAVIGUER</button>
+  <button class="btn"              id="btn-info"      onclick="UI.setMode('info')">🔍 INFOS</button>
+  <div class="hstats">
+    <div class="stat"><span>🌳</span><span class="v" id="h-trees">0</span><span>arbres</span></div>
+    <div class="stat"><span>🌿</span><span class="v" id="h-co2">0</span><span>kg CO₂/an</span></div>
+    <div class="stat water-stat"><span>⛲</span><span class="v" id="h-fountains">0</span><span>fontaines</span></div>
+  </div>
+</header>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- MAP -->
+  <div id="wrap">
+    <canvas id="map-canvas"></canvas>
+    <div id="tree-layer"></div>
+  </div>
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+
+    <div class="sec">
+      <h3>Mode actif</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px;">
+        <button class="btn active" id="sb-tree"     onclick="UI.setMode('tree')"     style="font-size:6px">🌱 ARBRE</button>
+        <button class="btn"        id="sb-fountain"  onclick="UI.setMode('fountain')" style="font-size:6px;border-color:rgba(88,208,240,.35);color:#58d0f0;">⛲ FONTAINE</button>
+        <button class="btn"        id="sb-pan"       onclick="UI.setMode('pan')"      style="font-size:6px">✋ NAVIGUER</button>
+        <button class="btn"        id="sb-info"      onclick="UI.setMode('info')"     style="font-size:6px">🔍 INFOS</button>
+      </div>
+      <div style="font-size:13px;color:var(--dim);line-height:1.7" id="mode-hint">
+        Cliquez sur la carte pour planter un arbre.
+      </div>
+    </div>
+
+    <div class="sec">
+      <h3>Zone sélectionnée</h3>
+      <div class="tile-box" id="tile-box">
+        <div class="tt">—</div>
+        <div style="color:var(--dim)">Cliquez sur la carte</div>
+      </div>
+    </div>
+
+    <!-- Onglets Arbres / Fontaines -->
+    <div class="sec">
+      <h3>Impact écologique</h3>
+      <div class="tabs">
+        <div class="tab active" id="tab-trees"    onclick="switchTab('trees')">🌳 ARBRES</div>
+        <div class="tab"        id="tab-fountains" onclick="switchTab('fountains')">⛲ FONTAINES</div>
+      </div>
+
+      <div class="tab-panel active" id="panel-trees">
+        <span class="big" id="tree-count">0</span>
+        <div style="font-size:13px;text-align:center;color:var(--dim);margin-bottom:7px;">arbres plantés</div>
+        <div class="pbar"><div class="pfill" id="pfill-tree" style="width:0%"></div></div>
+        <div style="font-size:13px;color:var(--dim);text-align:center;margin-bottom:9px;" id="milestone-tree">Objectif : 10 arbres</div>
+        <div class="eco-row">🌿 CO₂ absorbé   <span id="eco-co2">0 kg/an</span></div>
+        <div class="eco-row">🌡 Temp. réduite <span id="eco-temp">0°C</span></div>
+        <div class="eco-row">💧 Eau retenue   <span id="eco-water">0 L/an</span></div>
+      </div>
+
+      <div class="tab-panel" id="panel-fountains">
+        <span class="big water" id="fountain-count">0</span>
+        <div style="font-size:13px;text-align:center;color:var(--dim);margin-bottom:7px;">points d'eau installés</div>
+        <div class="pbar"><div class="pfill water" id="pfill-fountain" style="width:0%"></div></div>
+        <div style="font-size:13px;color:var(--dim);text-align:center;margin-bottom:9px;" id="milestone-fountain">Objectif : 5 fontaines</div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h3>Légende carte</h3>
+      <div id="legend"></div>
+    </div>
+
+    <div class="sec">
+      <h3>Contrôles</h3>
+      <div style="font-size:13px;color:var(--dim);line-height:2">
+        🖱 Scroll → zoom<br>
+        🖱 Clic droit → naviguer<br>
+        ⌨ ZQSD / flèches → déplacer<br>
+        ⌨ +/- zoom &nbsp; R reset<br>
+        ⌨ 1=Arbre 2=Fontaine 3=Nav
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- STATUSBAR -->
+<div class="status">
+  <span>📍 <span class="sv" id="st-pos">—</span></span>
+  <span>Zone : <span class="sv" id="st-zone">—</span></span>
+  <span>Zoom : <span class="sv" id="st-zoom">—</span></span>
+  <span style="margin-left:auto">Bordeaux Métropole · 28 communes · OSM</span>
+</div>
+
+<!-- LOADER -->
+<div id="loader">
+  <div style="font-size:48px">🌱</div>
+  <div class="ltitle">BORDEAUX VERT</div>
+  <div class="lwrap"><div class="lbar" id="lbar"></div></div>
+  <div class="lmsg" id="lmsg">Initialisation...</div>
+</div>
+
+<script>
+function switchTab(tab) {
+  ['trees','fountains'].forEach(t => {
+    document.getElementById('tab-'+t).classList.toggle('active', t===tab);
+    document.getElementById('panel-'+t).classList.toggle('active', t===tab);
+  });
+}
+</script>
+<script src="config.js"></script>
+<script src="map.js"></script>
+<script src="ui.js"></script>
+<script src="entities.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
