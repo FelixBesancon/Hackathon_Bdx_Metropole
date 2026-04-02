@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 
 // Leaflet requires browser APIs — disable SSR
@@ -19,8 +19,101 @@ const BordeauxMap = dynamic(() => import("./BordeauxMap"), {
 
 type MapMode = "real" | "pixel";
 
+const TUTORIAL_CONTENT: Record<MapMode, { title: string; intro: string; items: { icon: string; label: string; description: string }[] }> = {
+  real: {
+    title: "Bienvenue sur la carte réelle",
+    intro: "Explorez Bordeaux Métropole avec plusieurs couches de données interactives :",
+    items: [
+      { icon: "🌿", label: "Végétation", description: "Affiche les zones de végétation urbaine, colorées selon le nombre d'arbres." },
+      { icon: "☀️", label: "Îlots de chaleur / fraîcheur", description: "Visualisez les zones chaudes (rouge) et fraîches (bleu) de la métropole." },
+      { icon: "💧", label: "Fontaines", description: "Localisez les fontaines d'eau potable sur la carte." },
+    ],
+  },
+  pixel: {
+    title: "Bienvenue sur la carte pixel",
+    intro: "Une vue fictive et stylisée de la ville :",
+    items: [
+      { icon: "🟩", label: "Vue pixel", description: "Une représentation pixelisée de Bordeaux — cette vue est en cours de développement." },
+    ],
+  },
+};
+
+function TutorialPopup({ mode, onClose }: { mode: MapMode; onClose: () => void }) {
+  const content = TUTORIAL_CONTENT[mode];
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 2000,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
+      fontFamily: "'DM Sans', system-ui, sans-serif",
+    }} onClick={onClose}>
+      <div style={{
+        background: "white", borderRadius: 16, padding: "28px 32px",
+        maxWidth: 420, width: "90%", boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
+        animation: "popIn 0.2s ease-out",
+      }} onClick={(e) => e.stopPropagation()}>
+        <h2 style={{ margin: "0 0 8px", fontSize: 18, fontWeight: 700, color: "#1b4332" }}>
+          {content.title}
+        </h2>
+        <p style={{ margin: "0 0 16px", fontSize: 13, color: "#666", lineHeight: 1.5 }}>
+          {content.intro}
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {content.items.map((item) => (
+            <div key={item.label} style={{
+              display: "flex", alignItems: "flex-start", gap: 10,
+              background: "#f7f6f2", borderRadius: 10, padding: "10px 12px",
+            }}>
+              <span style={{ fontSize: 20, lineHeight: 1 }}>{item.icon}</span>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#1b4332" }}>{item.label}</div>
+                <div style={{ fontSize: 12, color: "#666", lineHeight: 1.4, marginTop: 2 }}>{item.description}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <button onClick={onClose} style={{
+          marginTop: 20, width: "100%", padding: "10px 0",
+          background: "#2d6a4f", color: "white", border: "none",
+          borderRadius: 8, fontSize: 13, fontWeight: 600,
+          cursor: "pointer",
+        }}>
+          C&apos;est compris !
+        </button>
+      </div>
+      <style>{`@keyframes popIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }`}</style>
+    </div>
+  );
+}
+
 export default function MapContainer() {
   const [mode, setMode] = useState<MapMode>("real");
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [seenTutorials, setSeenTutorials] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const seen = JSON.parse(localStorage.getItem("mapTutorialsSeen") || "{}");
+    setSeenTutorials(seen);
+    if (!seen["real"]) {
+      setShowTutorial(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!seenTutorials[mode] && Object.keys(seenTutorials).length > 0 || (!seenTutorials[mode] && mode === "pixel")) {
+      const seen = JSON.parse(localStorage.getItem("mapTutorialsSeen") || "{}");
+      if (!seen[mode]) {
+        setShowTutorial(true);
+      }
+    }
+  }, [mode, seenTutorials]);
+
+  const closeTutorial = () => {
+    setShowTutorial(false);
+    const updated = { ...seenTutorials, [mode]: true };
+    setSeenTutorials(updated);
+    localStorage.setItem("mapTutorialsSeen", JSON.stringify(updated));
+  };
 
   return (
     <div style={{ position: "relative", flex: 1, width: "100%", overflow: "hidden", display: "flex", flexDirection: "column" }}>
@@ -89,6 +182,27 @@ export default function MapContainer() {
           Carte pixel
         </button>
       </div>
+
+      {/* Help button */}
+      <button
+        onClick={() => setShowTutorial(true)}
+        title="Aide"
+        style={{
+          position: "absolute", top: 16, left: 16, zIndex: 1100,
+          width: 34, height: 34, borderRadius: "50%",
+          background: "rgba(255,255,255,0.96)", backdropFilter: "blur(12px)",
+          border: "1px solid rgba(0,0,0,0.08)", cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.10)",
+          fontSize: 15, fontWeight: 700, color: "#2d6a4f",
+          fontFamily: "'DM Sans', system-ui, sans-serif",
+        }}
+      >
+        ?
+      </button>
+
+      {/* Tutorial popup */}
+      {showTutorial && <TutorialPopup mode={mode} onClose={closeTutorial} />}
 
       {mode === "real" ? (
         <BordeauxMap />
