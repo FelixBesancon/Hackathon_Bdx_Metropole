@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
+import PixelMap from "./pixel-map/PixelMap";
 
 // Leaflet requires browser APIs — disable SSR
 const BordeauxMap = dynamic(() => import("./BordeauxMap"), {
@@ -31,9 +32,11 @@ const TUTORIAL_CONTENT: Record<MapMode, { title: string; intro: string; items: {
   },
   pixel: {
     title: "Bienvenue sur la carte pixel",
-    intro: "Une vue fictive et stylisée de la ville :",
+    intro: "Une vue interactive pixel art de Bordeaux Métropole :",
     items: [
-      { icon: "🟩", label: "Vue pixel", description: "Une représentation pixelisée de Bordeaux — cette vue est en cours de développement." },
+      { icon: "🌱", label: "Planter des arbres", description: "Cliquez sur une zone compatible pour planter un arbre. Chaque arbre est sauvegardé et visible par tous." },
+      { icon: "⛲", label: "Installer des fontaines", description: "Ajoutez des points d'eau sur les zones plantables pour améliorer la fraîcheur urbaine." },
+      { icon: "☀️", label: "Îlots de chaleur", description: "Activez la couche chaleur dans la sidebar pour visualiser les zones chaudes et fraîches superposées à la carte pixel." },
     ],
   },
 };
@@ -212,6 +215,8 @@ export default function MapContainer() {
       {mode === "real" ? (
         <BordeauxMap />
       ) : (
+        <PixelMap />
+        /* Placeholder pour la carte pixel en développement * /
         <div style={{
           flex: 1,
           width: "100%",
@@ -248,6 +253,7 @@ export default function MapContainer() {
             </p>
           </div>
         </div>
+        */
       )}
     </div>
   );

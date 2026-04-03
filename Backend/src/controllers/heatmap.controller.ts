@@ -3,16 +3,8 @@ import * as heatmapService from "../services/heatmap.service";
 
 function parseViewportQuery(req: Request) {
   const bboxParam = typeof req.query.bbox === "string" ? req.query.bbox : null;
-  const zoomParam = typeof req.query.zoom === "string" ? Number(req.query.zoom) : undefined;
 
-  let bounds:
-    | {
-        west: number;
-        south: number;
-        east: number;
-        north: number;
-      }
-    | undefined;
+  let bounds: { west: number; south: number; east: number; north: number } | undefined;
 
   if (bboxParam) {
     const values = bboxParam.split(",").map((value) => Number(value));
@@ -22,10 +14,7 @@ function parseViewportQuery(req: Request) {
     }
   }
 
-  return {
-    bounds,
-    zoom: Number.isFinite(zoomParam) ? zoomParam : undefined,
-  };
+  return { bounds };
 }
 
 export async function getHeatZones(_req: Request, res: Response) {

@@ -7,6 +7,11 @@ export interface CitizenAction {
   lng: number;
   radius: number;
   impact: number;
+  col: number | null;
+  row: number | null;
+  mx: number | null;
+  my: number | null;
+  tileName: string | null;
   createdAt: Date;
 }
 
@@ -15,4 +20,9 @@ export interface CreateActionPayload {
   lat: number;
   lng: number;
   radius: number;
+  col?: number;
+  row?: number;
+  mx?: number;
+  my?: number;
+  tileName?: string;
 }

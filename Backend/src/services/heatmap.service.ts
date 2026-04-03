@@ -38,7 +38,6 @@ interface BoundsFilter {
 
 interface ViewportQuery {
   bounds?: BoundsFilter;
-  zoom?: number;
 }
 
 export async function getAllZones() {
@@ -50,36 +49,20 @@ export async function getZoneById(id: number) {
 }
 
 export async function getHeatmapSource(query: ViewportQuery = {}): Promise<GeoJSONFeatureCollection> {
-  const totalMatching = query.bounds
-    ? await heatmapRepo.countSourceFeatures(query.bounds)
-    : (await heatmapRepo.findAllSourceFeatures()).length;
-
-  const take = getFeatureCap(query.zoom, "heat", totalMatching);
-  const rows = query.bounds || take
-    ? await heatmapRepo.findSourceFeatures({ bounds: query.bounds, take })
-    : await heatmapRepo.findAllSourceFeatures();
-
+  const rows = await heatmapRepo.findSourceFeatures({ bounds: query.bounds });
   return rowsToGeoJson(rows, {
     displayedCount: rows.length,
-    totalMatching,
-    simplified: typeof take === "number" && totalMatching > rows.length,
+    totalMatching: rows.length,
+    simplified: false,
   });
 }
 
 export async function getVegetationSource(query: ViewportQuery = {}): Promise<GeoJSONFeatureCollection> {
-  const totalMatching = query.bounds
-    ? await heatmapRepo.countVegetationFeatures(query.bounds)
-    : (await heatmapRepo.findAllVegetationFeatures()).length;
-
-  const take = getFeatureCap(query.zoom, "vegetation", totalMatching);
-  const rows = query.bounds || take
-    ? await heatmapRepo.findVegetationFeatures({ bounds: query.bounds, take })
-    : await heatmapRepo.findAllVegetationFeatures();
-
+  const rows = await heatmapRepo.findVegetationFeatures({ bounds: query.bounds });
   return rowsToGeoJson(rows, {
     displayedCount: rows.length,
-    totalMatching,
-    simplified: typeof take === "number" && totalMatching > rows.length,
+    totalMatching: rows.length,
+    simplified: false,
   });
 }
 
