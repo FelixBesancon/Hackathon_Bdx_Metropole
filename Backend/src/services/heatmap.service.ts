@@ -38,7 +38,6 @@ interface BoundsFilter {
 
 interface ViewportQuery {
   bounds?: BoundsFilter;
-  zoom?: number;
 }
 
 export async function getAllZones() {
@@ -50,36 +49,20 @@ export async function getZoneById(id: number) {
 }
 
 export async function getHeatmapSource(query: ViewportQuery = {}): Promise<GeoJSONFeatureCollection> {
-  const totalMatching = query.bounds
-    ? await heatmapRepo.countSourceFeatures(query.bounds)
-    : (await heatmapRepo.findAllSourceFeatures()).length;
-
-  const take = getFeatureCap(query.zoom, "heat", totalMatching);
-  const rows = query.bounds || take
-    ? await heatmapRepo.findSourceFeatures({ bounds: query.bounds, take })
-    : await heatmapRepo.findAllSourceFeatures();
-
+  const rows = await heatmapRepo.findSourceFeatures({ bounds: query.bounds });
   return rowsToGeoJson(rows, {
     displayedCount: rows.length,
-    totalMatching,
-    simplified: typeof take === "number" && totalMatching > rows.length,
+    totalMatching: rows.length,
+    simplified: false,
   });
 }
 
 export async function getVegetationSource(query: ViewportQuery = {}): Promise<GeoJSONFeatureCollection> {
-  const totalMatching = query.bounds
-    ? await heatmapRepo.countVegetationFeatures(query.bounds)
-    : (await heatmapRepo.findAllVegetationFeatures()).length;
-
-  const take = getFeatureCap(query.zoom, "vegetation", totalMatching);
-  const rows = query.bounds || take
-    ? await heatmapRepo.findVegetationFeatures({ bounds: query.bounds, take })
-    : await heatmapRepo.findAllVegetationFeatures();
-
+  const rows = await heatmapRepo.findVegetationFeatures({ bounds: query.bounds });
   return rowsToGeoJson(rows, {
     displayedCount: rows.length,
-    totalMatching,
-    simplified: typeof take === "number" && totalMatching > rows.length,
+    totalMatching: rows.length,
+    simplified: false,
   });
 }
 
@@ -111,26 +94,6 @@ function rowsToGeoJson(
   };
 }
 
-function getFeatureCap(
-  zoom: number | undefined,
-  dataset: "heat" | "vegetation",
-  totalMatching: number
-): number | undefined {
-  if (zoom == null) {
-    return dataset === "heat" ? Math.min(totalMatching, 20_000) : undefined;
-  }
-
-  if (dataset === "heat") {
-    if (zoom <= 11) return 5_000;
-    if (zoom <= 12) return 12_000;
-    if (zoom <= 13) return 25_000;
-    return undefined;
-  }
-
-  if (zoom <= 11) return 4_000;
-  if (zoom <= 12) return 8_000;
-  return undefined;
-}
 
 function toGeoJsonFeature(row: DbFeatureRow): GeoJSONFeature | null {
   const geometry = parseGeometry(row.geometry);

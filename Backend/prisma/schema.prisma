@@ -87,6 +87,12 @@ model CitizenAction {
   lng       Float
   radius    Float
   impact    Float
+  // Champs carte pixel (optionnels)
+  col       Int?
+  row       Int?
+  mx        Float?
+  my        Float?
+  tileName  String?
   createdAt DateTime   @default(now())
 }
 

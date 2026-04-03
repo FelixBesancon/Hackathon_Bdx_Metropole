@@ -7,6 +7,11 @@ interface CreateActionData {
   lng: number;
   radius: number;
   impact: number;
+  col?: number | null;
+  row?: number | null;
+  mx?: number | null;
+  my?: number | null;
+  tileName?: string | null;
 }
 
 export async function findAll() {
