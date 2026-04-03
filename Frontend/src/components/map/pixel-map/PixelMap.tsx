@@ -21,6 +21,7 @@ const PIXEL_MAP_STYLES = `
 .pm-wrap.pan { cursor:grab; }
 .pm-wrap.pan.drag { cursor:grabbing; }
 .pm-canvas { position:absolute; top:0; left:0; image-rendering:pixelated; image-rendering:crisp-edges; transform-origin:0 0; }
+.pm-heat-canvas { position:absolute; top:0; left:0; transform-origin:0 0; pointer-events:none; z-index:5; }
 .pm-tree-layer { position:absolute; top:0; left:0; transform-origin:0 0; pointer-events:none; z-index:10; }
 
 @keyframes grow {
@@ -66,12 +67,37 @@ const PIXEL_MAP_STYLES = `
 }
 `;
 
+// Convertit une coordonnée GPS en pixels carte (inverse de MapEngine.toGPS)
+function gpsToMapPixels(lat: number, lon: number): { mx: number; my: number } {
+  const { S, N, W, E } = CONFIG.GPS;
+  const { COLS, ROWS, TILE_PX } = CONFIG;
+  const col = ((lon - W) / (E - W)) * COLS;
+  const row = ((lat - S) / (N - S)) * ROWS;
+  return {
+    mx: col * TILE_PX,
+    my: (ROWS - row) * TILE_PX, // Y inversé
+  };
+}
+
+function getHeatColor(delta: number | null): string {
+  if (delta === null || delta === undefined || isNaN(delta)) return "#999";
+  if (delta >= 3)  return "#c1121f";
+  if (delta >= 1)  return "#f77f00";
+  if (delta >= -1) return "#ffd166";
+  if (delta >= -3) return "#48cae4";
+  return "#118ab2";
+}
+
+type HeatFeature = GeoJSON.Feature<GeoJSON.Geometry, { delta?: number }>;
+
 export default function PixelMap() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const heatCanvasRef = useRef<HTMLCanvasElement>(null);
   const treeLayerRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<MapEngine | null>(null);
   const entitiesRef = useRef<Entities | null>(null);
+  const heatFeaturesRef = useRef<HeatFeature[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [loadMsg, setLoadMsg] = useState("Initialisation...");
@@ -84,6 +110,9 @@ export default function PixelMap() {
   const [activeTab, setActiveTab] = useState<"trees" | "fountains">("trees");
   const [cursorGps, setCursorGps] = useState<{ lat: number; lon: number } | null>(null);
   const [cursorZone, setCursorZone] = useState("");
+  const [heatVisible, setHeatVisible] = useState(false);
+  const [heatLoading, setHeatLoading] = useState(false);
+  const heatVisibleRef = useRef(false);
   const modeRef = useRef<ToolMode>("tree");
 
   const notify = useCallback((msg: string) => {
@@ -100,6 +129,86 @@ export default function PixelMap() {
     modeRef.current = m;
     setModeState(m);
   }, []);
+
+  // ── Overlay îlots de chaleur ─────────────────────────
+  const drawHeatOverlay = useCallback(() => {
+    const heatCanvas = heatCanvasRef.current;
+    const engine = engineRef.current;
+    if (!heatCanvas || !engine) return;
+
+    const { COLS, ROWS, TILE_PX } = CONFIG;
+    const W = COLS * TILE_PX;
+    const H = ROWS * TILE_PX;
+
+    // Dimensionner une seule fois — reset width efface le canvas et invalide le contexte
+    if (heatCanvas.width !== W || heatCanvas.height !== H) {
+      heatCanvas.width = W;
+      heatCanvas.height = H;
+    }
+
+    const ctx = heatCanvas.getContext("2d")!;
+    ctx.clearRect(0, 0, W, H);
+
+    if (!heatVisibleRef.current) return;
+
+    const features = heatFeaturesRef.current;
+    ctx.globalAlpha = 0.45;
+
+    for (const feature of features) {
+      const delta = feature.properties?.delta ?? null;
+      ctx.fillStyle = getHeatColor(delta !== null ? Number(delta) : null);
+      ctx.strokeStyle = "transparent";
+
+      const drawPolygon = (ring: number[][]) => {
+        ctx.beginPath();
+        ring.forEach(([lon, lat], i) => {
+          const { mx, my } = gpsToMapPixels(lat, lon);
+          if (i === 0) ctx.moveTo(mx, my);
+          else ctx.lineTo(mx, my);
+        });
+        ctx.closePath();
+        ctx.fill();
+      };
+
+      const geom = feature.geometry;
+      if (geom.type === "Polygon") {
+        drawPolygon(geom.coordinates[0] as number[][]);
+      } else if (geom.type === "MultiPolygon") {
+        for (const poly of geom.coordinates) {
+          drawPolygon(poly[0] as number[][]);
+        }
+      }
+    }
+
+    // Synchroniser le transform avec la caméra
+    const t = `translate(${engine.cam.x}px,${engine.cam.y}px) scale(${engine.cam.zoom})`;
+    heatCanvas.style.transform = t;
+  }, []);
+
+  const toggleHeat = useCallback(async () => {
+    if (heatVisibleRef.current) {
+      heatVisibleRef.current = false;
+      setHeatVisible(false);
+      drawHeatOverlay();
+      return;
+    }
+
+    // Premier chargement
+    if (heatFeaturesRef.current.length === 0) {
+      setHeatLoading(true);
+      try {
+        const res = await fetch("/api/heatmap/source/geojson");
+        const geoJson: GeoJSON.FeatureCollection = await res.json();
+        heatFeaturesRef.current = geoJson.features as HeatFeature[];
+      } finally {
+        setHeatLoading(false);
+      }
+    }
+
+    heatVisibleRef.current = true;
+    setHeatVisible(true);
+    drawHeatOverlay();
+  }, [drawHeatOverlay]);
 
   // ── Boot ────────────────────────────────────────────
   useEffect(() => {
@@ -141,6 +250,10 @@ export default function PixelMap() {
       entitiesRef.current = entities;
 
       engine.resetView(wrapRef.current!);
+
+      setLoadMsg("Chargement des actions sauvegardees...");
+      setLoadPct(88);
+      await entities.loadFromDb();
 
       setLoadMsg("Pret !");
       setLoadPct(100);
@@ -197,6 +310,14 @@ export default function PixelMap() {
       engine!.cam.x = cx + (e.clientX - dx);
       engine!.cam.y = cy + (e.clientY - dy);
       engine!.applyCamera();
+      syncHeatTransform();
+    }
+
+    function syncHeatTransform() {
+      const hc = heatCanvasRef.current;
+      if (!hc) return;
+      const t = `translate(${engine!.cam.x}px,${engine!.cam.y}px) scale(${engine!.cam.zoom})`;
+      hc.style.transform = t;
     }
 
     function onMouseUp() {
@@ -219,17 +340,18 @@ export default function PixelMap() {
       e.preventDefault();
       const rect = wrap!.getBoundingClientRect();
       engine!.zoomAt(e.deltaY < 0 ? 1.12 : 0.89, e.clientX - rect.left, e.clientY - rect.top);
+      syncHeatTransform();
     }
 
     function onKeyDown(e: KeyboardEvent) {
       const s = Math.max(40, 90 * engine!.cam.zoom);
-      if (e.key === "ArrowUp" || e.key === "z") engine!.pan(0, s);
-      if (e.key === "ArrowDown" || e.key === "s") engine!.pan(0, -s);
-      if (e.key === "ArrowLeft" || e.key === "q") engine!.pan(s, 0);
-      if (e.key === "ArrowRight" || e.key === "d") engine!.pan(-s, 0);
-      if (e.key === "+" || e.key === "=") engine!.zoomAt(1.2, window.innerWidth / 2, window.innerHeight / 2);
-      if (e.key === "-") engine!.zoomAt(0.83, window.innerWidth / 2, window.innerHeight / 2);
-      if (e.key === "r" || e.key === "R") engine!.resetView(wrap!);
+      if (e.key === "ArrowUp" || e.key === "z") { engine!.pan(0, s); syncHeatTransform(); }
+      if (e.key === "ArrowDown" || e.key === "s") { engine!.pan(0, -s); syncHeatTransform(); }
+      if (e.key === "ArrowLeft" || e.key === "q") { engine!.pan(s, 0); syncHeatTransform(); }
+      if (e.key === "ArrowRight" || e.key === "d") { engine!.pan(-s, 0); syncHeatTransform(); }
+      if (e.key === "+" || e.key === "=") { engine!.zoomAt(1.2, window.innerWidth / 2, window.innerHeight / 2); syncHeatTransform(); }
+      if (e.key === "-") { engine!.zoomAt(0.83, window.innerWidth / 2, window.innerHeight / 2); syncHeatTransform(); }
+      if (e.key === "r" || e.key === "R") { engine!.resetView(wrap!); syncHeatTransform(); }
       if (e.key === "1") setMode("tree");
       if (e.key === "2") setMode("fountain");
       if (e.key === "3") setMode("pan");
@@ -237,7 +359,7 @@ export default function PixelMap() {
     }
 
     function onContextMenu(e: Event) { e.preventDefault(); }
-    function onResize() { engine!.resetView(wrap!); }
+    function onResize() { engine!.resetView(wrap!); syncHeatTransform(); }
 
     wrap.addEventListener("click", onClick);
     wrap.addEventListener("mousedown", onMouseDown);
@@ -328,6 +450,7 @@ export default function PixelMap() {
         {/* MAP */}
         <div ref={wrapRef} className={`pm-wrap${mode === "pan" ? " pan" : ""}`}>
           <canvas ref={canvasRef} className="pm-canvas" />
+          <canvas ref={heatCanvasRef} className="pm-heat-canvas" />
           <div ref={treeLayerRef} className="pm-tree-layer" />
         </div>
 
@@ -344,6 +467,42 @@ export default function PixelMap() {
               ))}
             </div>
             <div style={{ fontSize: 13, color: V.dim, lineHeight: 1.7 }}>{MODE_HINTS[mode]}</div>
+          </div>
+
+          {/* Couches */}
+          <div style={{ padding: 13, borderBottom: `1px solid rgba(126,232,74,0.1)` }}>
+            <h3 style={{ fontFamily: "'Press Start 2P',monospace", fontSize: 6, color: V.dim, letterSpacing: 2, marginBottom: 9, textTransform: "uppercase" }}>Couches</h3>
+            <button
+              onClick={toggleHeat}
+              disabled={heatLoading}
+              style={{
+                width: "100%", fontFamily: "'Press Start 2P',monospace", fontSize: 6,
+                padding: "7px 9px", cursor: heatLoading ? "wait" : "pointer",
+                background: heatVisible ? "rgba(193,18,31,0.15)" : V.dark,
+                border: `2px solid ${heatVisible ? "#c1121f" : "rgba(193,18,31,0.3)"}`,
+                color: heatVisible ? "#f05050" : V.dim,
+                display: "flex", alignItems: "center", gap: 7, transition: "all .15s",
+              }}
+            >
+              <span style={{ fontSize: 12 }}>{heatLoading ? "⏳" : "☀️"}</span>
+              {heatLoading ? "CHARGEMENT..." : (heatVisible ? "CHALEUR ON" : "CHALEUR OFF")}
+            </button>
+            {heatVisible && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 8, fontSize: 12 }}>
+                {[
+                  { color: "#c1121f", label: "Très chaud (Δ ≥ +3°C)" },
+                  { color: "#f77f00", label: "Chaud (Δ ≥ +1°C)" },
+                  { color: "#ffd166", label: "Neutre" },
+                  { color: "#48cae4", label: "Frais (Δ ≤ -1°C)" },
+                  { color: "#118ab2", label: "Très frais (Δ ≤ -3°C)" },
+                ].map(({ color, label }) => (
+                  <div key={label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={{ width: 10, height: 10, background: color, flexShrink: 0 }} />
+                    <span style={{ color: V.dim }}>{label}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Tile info */}

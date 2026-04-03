@@ -5,8 +5,13 @@ export interface CitizenAction {
   type: ActionType;
   lat: number;
   lng: number;
-  radius: number;  // rayon d'impact en mètres
-  impact: number;  // réduction thermique estimée en °C
+  radius: number;
+  impact: number;
+  col: number | null;
+  row: number | null;
+  mx: number | null;
+  my: number | null;
+  tileName: string | null;
   createdAt: Date;
 }
 
@@ -15,4 +20,9 @@ export interface CreateActionPayload {
   lat: number;
   lng: number;
   radius: number;
+  col?: number;
+  row?: number;
+  mx?: number;
+  my?: number;
+  tileName?: string;
 }

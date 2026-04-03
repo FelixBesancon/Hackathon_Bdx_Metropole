@@ -28,6 +28,7 @@ export class Entities {
   ) {
     this.engine = engine;
     this.onStatsChange = onStatsChange;
+
     this.onNotify = onNotify;
   }
 
@@ -159,6 +160,80 @@ export class Entities {
     });
   }
 
+  // ── Persistance BDD ───────────────────────────────────
+  private async saveToDb(
+    type: "VEGETATION" | "WATER_POINT",
+    entity: PlantedEntity,
+  ) {
+    try {
+      await fetch("/api/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type,
+          lat: entity.gps.lat,
+          lng: entity.gps.lon,
+          radius: CONFIG.CELL_M,
+          col: entity.col,
+          row: entity.row,
+          mx: entity.mx,
+          my: entity.my,
+          tileName: String(entity.tileName),
+        }),
+      });
+    } catch {
+      // Silencieux — l'entité est déjà affichée localement
+    }
+  }
+
+  // ── Chargement depuis la BDD ──────────────────────────
+  async loadFromDb() {
+    try {
+      const res = await fetch("/api/actions");
+      const actions: Array<{
+        type: string;
+        lat: number;
+        lng: number;
+        col: number | null;
+        row: number | null;
+        mx: number | null;
+        my: number | null;
+        tileName: string | null;
+        createdAt: string;
+      }> = await res.json();
+
+      for (const action of actions) {
+        if (
+          action.col == null || action.row == null ||
+          action.mx == null || action.my == null
+        ) continue; // action non-pixel, ignorer
+
+        const entity: PlantedEntity = {
+          id: Date.now() + Math.random(),
+          col: action.col,
+          row: action.row,
+          mx: action.mx,
+          my: action.my,
+          tileName: action.tileName ?? "",
+          date: new Date(action.createdAt).toLocaleDateString("fr-FR"),
+          gps: { lat: action.lat, lon: action.lng },
+        };
+
+        if (action.type === "VEGETATION") {
+          this.trees.push(entity);
+        } else if (action.type === "WATER_POINT") {
+          this.fountains.push(entity);
+          this.renderFountain(entity, false);
+        }
+      }
+
+      this.renderAll();
+      this.onStatsChange(this.trees.length, this.fountains.length);
+    } catch {
+      // Silencieux en cas d'erreur réseau
+    }
+  }
+
   // ── Planter un arbre ──────────────────────────────────
   plantTree(
     mx: number,
@@ -189,6 +264,7 @@ export class Entities {
     this.renderAll();
     this.onStatsChange(this.trees.length, this.fountains.length);
     this.onNotify("\u{1F331} Arbre plante ! " + (meta.label || ""));
+    this.saveToDb("VEGETATION", tree);
     return true;
   }
 
@@ -221,6 +297,7 @@ export class Entities {
     this.renderFountain(fountain, true);
     this.onStatsChange(this.trees.length, this.fountains.length);
     this.onNotify("\u26F2 Point d'eau installe !");
+    this.saveToDb("WATER_POINT", fountain);
     return true;
   }
 
