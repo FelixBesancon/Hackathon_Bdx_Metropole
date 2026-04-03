@@ -5,6 +5,7 @@ import {
 	getHeatmapSource,
 	getFountainsSource,
 	getVegetationSource,
+	getICTUSource,
 	clearCache,
 	refreshHeatmapData,
 	getHeatmapSyncStatus,
@@ -15,6 +16,7 @@ const router = Router();
 router.get("/source/geojson", getHeatmapSource);
 router.get("/fountains/geojson", getFountainsSource);
 router.get("/vegetation/geojson", getVegetationSource);
+router.get("/ictu/geojson", getICTUSource);
 router.get("/sync/status", getHeatmapSyncStatus);
 router.post("/sync/refresh", refreshHeatmapData);
 router.post("/cache/clear", clearCache);

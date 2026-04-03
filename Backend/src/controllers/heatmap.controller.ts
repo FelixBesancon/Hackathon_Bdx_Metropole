@@ -88,6 +88,19 @@ export async function getVegetationSource(req: Request, res: Response) {
   }
 }
 
+export async function getICTUSource(req: Request, res: Response) {
+  try {
+    const geoJson = await heatmapService.getICTUSource(parseViewportQuery(req));
+    res.json(geoJson);
+  } catch (error) {
+    console.error("Erreur lors de la récupération des données ICTU:", error);
+    res.status(500).json({
+      error: "Erreur serveur",
+      message: "Impossible de récupérer les données ICTU"
+    });
+  }
+}
+
 export async function clearCache(_req: Request, res: Response) {
   try {
     const report = await heatmapService.refreshData({

@@ -4,7 +4,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 model HeatZone {
@@ -58,6 +57,27 @@ model FountainFeature {
   updatedAt  DateTime @updatedAt
 
   @@index([datasetId])
+}
+
+model ICTUFeature {
+  id         Int      @id @default(autoincrement())
+  sourceId   String   @unique
+  geometry   Json
+  properties Json
+  ictuMin    Float?
+  ictuMean   Float?
+  ictuMedian Float?
+  ictuMax    Float?
+  minLng     Float
+  minLat     Float
+  maxLng     Float
+  maxLat     Float
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([ictuMedian])
+  @@index([minLng, maxLng])
+  @@index([minLat, maxLat])
 }
 
 model DatasetSyncState {

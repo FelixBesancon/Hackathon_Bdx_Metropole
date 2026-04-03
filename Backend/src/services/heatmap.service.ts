@@ -83,6 +83,23 @@ export async function getVegetationSource(query: ViewportQuery = {}): Promise<Ge
   });
 }
 
+export async function getICTUSource(query: ViewportQuery = {}): Promise<GeoJSONFeatureCollection> {
+  const totalMatching = query.bounds
+    ? await heatmapRepo.countICTUFeatures(query.bounds)
+    : (await heatmapRepo.findAllICTUFeatures()).length;
+
+  const take = getFeatureCap(query.zoom, "ictu", totalMatching);
+  const rows = query.bounds || take
+    ? await heatmapRepo.findICTUFeatures({ bounds: query.bounds, take })
+    : await heatmapRepo.findAllICTUFeatures();
+
+  return rowsToGeoJson(rows, {
+    displayedCount: rows.length,
+    totalMatching,
+    simplified: typeof take === "number" && totalMatching > rows.length,
+  });
+}
+
 export async function getFountainsSource(): Promise<GeoJSONFeatureCollection> {
   const rows = await heatmapRepo.findAllFountainFeatures();
   return rowsToGeoJson(rows);
@@ -113,7 +130,7 @@ function rowsToGeoJson(
 
 function getFeatureCap(
   zoom: number | undefined,
-  dataset: "heat" | "vegetation",
+  dataset: "heat" | "vegetation" | "ictu",
   totalMatching: number
 ): number | undefined {
   if (zoom == null) {
@@ -124,6 +141,13 @@ function getFeatureCap(
     if (zoom <= 11) return 5_000;
     if (zoom <= 12) return 12_000;
     if (zoom <= 13) return 25_000;
+    return undefined;
+  }
+
+  if (dataset === "ictu") {
+    if (zoom <= 11) return 2_000;
+    if (zoom <= 12) return 5_000;
+    if (zoom <= 13) return 15_000;
     return undefined;
   }
 

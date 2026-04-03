@@ -54,6 +54,7 @@ const BORDEAUX_METRO_INSEE_CODES = [
 
 const SOURCE_DATASET = "ri_icu_ifu_s";
 const VEGETATION_DATASET = "met_vegetation_urbaine";
+const ICTU_DATASET = "ri_ictu_s";
 const FOUNTAINS_DATASETS = [
   { datasetId: "bor_fontaines_eau_potable", sourceName: "Bordeaux Métropole" },
   { datasetId: "mer_points-d-eau-potable", sourceName: "Mérignac" },
@@ -111,6 +112,7 @@ async function runSync(force: boolean, reason: string): Promise<SyncReport> {
   const results: DatasetSyncResult[] = [];
   results.push(await syncSourceDataset(force));
   results.push(await syncVegetationDataset(force));
+  results.push(await syncICTUDataset(force));
   results.push(await syncFountainsDataset(force));
 
   const finishedAt = new Date();
@@ -315,6 +317,118 @@ async function syncVegetationDataset(force: boolean): Promise<DatasetSyncResult>
       datasetKey,
       status: "failed",
       message: `Échec sync végétation: ${toErrorMessage(error)}`,
+    };
+  }
+}
+
+async function syncICTUDataset(force: boolean): Promise<DatasetSyncResult> {
+  const datasetKey = "ictu";
+
+  try {
+    await markRunning(datasetKey);
+
+    const meta = await fetchDatasetMetadata(ICTU_DATASET);
+    const signature = buildSignature(meta);
+    const previous = await prisma.datasetSyncState.findUnique({ where: { datasetKey } });
+
+    if (!force && previous?.signature === signature) {
+      await markSuccess(datasetKey, meta, signature, "Aucun changement détecté");
+      return {
+        datasetKey,
+        status: "skipped",
+        message: "Aucun changement détecté",
+      };
+    }
+
+    const records = await fetchAllRecordsFromExport(ICTU_DATASET);
+    const rows = records
+      .map((record) => {
+        const geometry = extractPointGeometry(record);
+        if (!geometry) return null;
+
+        const bounds = computeGeometryBounds(geometry);
+        if (!bounds) return null;
+
+        const properties = sanitizeProperties(record);
+        const sourceId = buildStableSourceId(ICTU_DATASET, record, geometry, properties);
+
+        // Extract ICTU metrics
+        const ictuMin = extractNumericProperty(properties, "ictu_min");
+        const ictuMean = extractNumericProperty(properties, "ictu_mean");
+        const ictuMedian = extractNumericProperty(properties, "ictu_median");
+        const ictuMax = extractNumericProperty(properties, "ictu_max");
+
+        return {
+          sourceId,
+          geometry: geometry as Prisma.InputJsonValue,
+          properties: properties as Prisma.InputJsonValue,
+          ictuMin,
+          ictuMean,
+          ictuMedian,
+          ictuMax,
+          minLng: bounds.minLng,
+          minLat: bounds.minLat,
+          maxLng: bounds.maxLng,
+          maxLat: bounds.maxLat,
+        };
+      })
+      .filter((row): row is {
+        sourceId: string;
+        geometry: Prisma.InputJsonValue;
+        properties: Prisma.InputJsonValue;
+        ictuMin: number | null;
+        ictuMean: number | null;
+        ictuMedian: number | null;
+        ictuMax: number | null;
+        minLng: number;
+        minLat: number;
+        maxLng: number;
+        maxLat: number;
+      } => Boolean(row));
+
+    await prisma.$transaction(async (tx) => {
+      await tx.iCTUFeature.deleteMany();
+      if (rows.length > 0) {
+        await tx.iCTUFeature.createMany({ data: rows, skipDuplicates: true });
+      }
+
+      await tx.datasetSyncState.upsert({
+        where: { datasetKey },
+        update: {
+          signature,
+          remoteModified: getRemoteModified(meta),
+          remoteProcessed: getRemoteProcessed(meta),
+          remoteRecords: getRemoteRecords(meta),
+          lastStatus: DatasetSyncStatus.SUCCESS,
+          lastSuccessAt: new Date(),
+          lastError: null,
+        },
+        create: {
+          datasetKey,
+          signature,
+          remoteModified: getRemoteModified(meta),
+          remoteProcessed: getRemoteProcessed(meta),
+          remoteRecords: getRemoteRecords(meta),
+          lastStatus: DatasetSyncStatus.SUCCESS,
+          lastAttemptAt: new Date(),
+          lastSuccessAt: new Date(),
+          lastError: null,
+        },
+      });
+    }, { timeout: 120_000, maxWait: 10_000 });
+
+    return {
+      datasetKey,
+      status: "updated",
+      fetchedRecords: rows.length,
+      message: `Indice de confort thermique urbain (ICTU) mis à jour (${rows.length} enregistrements)`,
+    };
+  } catch (error) {
+    await markFailure(datasetKey, error);
+    return {
+      datasetKey,
+      status: "failed",
+      message: `Échec sync ICTU: ${toErrorMessage(error)}`,
     };
   }
 }
@@ -862,4 +976,17 @@ function toErrorMessage(error: unknown): string {
   }
 
   return String(error);
+}
+
+function extractNumericProperty(properties: Record<string, unknown>, ...keys: string[]): number | null {
+  for (const key of keys) {
+    const value = properties[key];
+    if (value !== undefined && value !== null) {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric)) {
+        return numeric;
+      }
+    }
+  }
+  return null;
 }

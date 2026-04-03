@@ -17,6 +17,8 @@ type FeatureCollectionWithMeta = GeoJSON.FeatureCollection & {
 
 type VegetationDisplayOption = "none" | "nb_arbre" | "p_veg" | "p_can";
 
+type ICTUDisplayOption = "none" | "ictu_min" | "ictu_median" | "ictu_max";
+
 type VegetationMetricBounds = {
   min: number;
   max: number;
@@ -44,7 +46,7 @@ const HEAT_CATEGORY_LABELS: Record<HeatCategory, string> = {
 const HEAT_CATEGORY_COLORS: Record<HeatCategory, string> = {
   très_forte_chaleur:   "#780000",
   forte_chaleur:        "#c1121f",
-  chaleur:              "#f77f00",
+  chaleur:              "#f08686",
   fraicheur:            "#48cae4",
   forte_fraicheur:      "#118ab2",
   très_forte_fraicheur: "#023e8a",
@@ -69,10 +71,23 @@ function featureMatchesHeatFilters(feature: GeoJSON.Feature, filters: Set<HeatCa
 }
 
 const VEG_TOOLTIPS: Record<"nb_arbre" | "p_veg" | "p_can", string> = {
-  nb_arbre: "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nombre total d'arbres recensés dans la zone hexagonale.",
-  p_veg:    "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pourcentage de surface végétalisée par rapport à la surface totale de la zone.",
-  p_can:    "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pourcentage de couverture par la canopée arborée au sein de la zone.",
+  nb_arbre: "Nombre total d'arbres dans la maille. Plus il y a d'arbres, plus l'ombre et l'évapotranspiration aident a limiter la chaleur ressentie.",
+  p_veg:    "Part de la maille occupee par de la vegetation. On calcule le pourcentage de surface couverte par des types de vegetation (pelouse, arbustes, arbres, ...).",
+  p_can:    "Part de la maille couverte par la vegetation arboree et arbustive (la canopee). Plus cette couverture est importante, plus elle apporte de l'ombre et de la fraicheur en ville.",
 };
+
+const ICTU_TOOLTIPS: Record<"ictu_min" | "ictu_median" | "ictu_max", string> = {
+  ictu_min:    "Valeur la plus défavorable observée dans la maille. Plus c'est proche de 0, plus le risque d'inconfort thermique est marqué.",
+  ictu_median: "Valeur la plus représentative de la maille (50% au-dessus, 50% en dessous). Bon indicateur du niveau de confort global.",
+  ictu_max:    "Valeur la plus favorable observée dans la maille. Plus c'est proche de 3, plus le confort thermique est bon.",
+};
+
+const LAYER_HELP_TOOLTIPS = {
+  vegetation: "La vegetation influence fortement la chaleur ambiante. Chaque maille hexagonale represente environ 250 m de diametre, soit autour de 54 000 m2 analyses.",
+  heat: "Les ilots montrent les zones plus chaudes ou plus fraiches que leur environnement. C'est utile pour cibler les secteurs prioritaires en adaptation climatique.",
+  fountains: "L'accès à l'eau est essentiel en période de forte chaleur. S'hydrater regulièrement aide a limiter les risques pour la sante et améliore le confort en ville.",
+  ictu: "L'ICTU varie de 0 (inconfort) a 3 (confort). Il integre déjà des facteurs liés aux ilots de chaleur/fraicheur, donc afficher ICTU et ilots ensemble n'est pas pertinent.",
+} as const;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -87,6 +102,7 @@ const BORDEAUX_MAX_BOUNDS: [[number, number], [number, number]] = [
 
 const VEGETATION_PANE = "vegetationPane";
 const HEAT_PANE = "heatPane";
+const ICTU_PANE = "ictuPane";
 
 // LOD (Level of Detail) thresholds
 const LOD_THRESHOLDS = {
@@ -246,6 +262,71 @@ function computeVegetationMetricBounds(
   };
 }
 
+function extractICTUMetricValue(
+  props: Record<string, unknown>,
+  display: ICTUDisplayOption
+): number | null {
+  if (display === "none") return null;
+
+  const raw =
+    display === "ictu_min"
+      ? findPropertyValue(props, "ictu_min")
+      : display === "ictu_median"
+          ? findPropertyValue(props, "ictu_median")
+          : findPropertyValue(props, "ictu_max");
+
+  const numeric = Number(raw);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function computeICTUMetricBounds(
+  geoJson: FeatureCollectionWithMeta,
+  display: ICTUDisplayOption
+): VegetationMetricBounds | null {
+  if (display === "none") return null;
+
+  const values: number[] = [];
+
+  for (const feature of geoJson.features) {
+    const props = (feature.properties ?? {}) as Record<string, unknown>;
+    const value = extractICTUMetricValue(props, display);
+    if (value !== null && Number.isFinite(value)) {
+      values.push(value);
+    }
+  }
+
+  if (!values.length) return null;
+
+  return {
+    min: Math.min(...values),
+    max: Math.max(...values),
+  };
+}
+
+function interpolateColor(color1: string, color2: string, factor: number): string {
+  const f = Math.max(0, Math.min(1, factor));
+  
+  const parseHex = (hex: string) => {
+    const c = parseInt(hex.slice(1), 16);
+    return { r: (c >> 16) & 255, g: (c >> 8) & 255, b: c & 255 };
+  };
+
+  const c1 = parseHex(color1);
+  const c2 = parseHex(color2);
+
+  const r = Math.round(c1.r + (c2.r - c1.r) * f);
+  const g = Math.round(c1.g + (c2.g - c1.g) * f);
+  const b = Math.round(c1.b + (c2.b - c1.b) * f);
+
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
+}
+
+function getICTUColor(value: number): string {
+  if (value < 1) return "#FF0033";
+  if (value < 2) return "#C42EFF";
+  return "#5C7AFF";
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function BordeauxMap() {
@@ -263,25 +344,33 @@ export default function BordeauxMap() {
   const [vegVisible, setVegVisible] = useState(false);
   const [heatVisible, setHeatVisible] = useState(false);
   const [fountainsVisible, setFountainsVisible] = useState(false);
+  const [ictuVisible, setIctuVisible] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [heatLoading, setHeatLoading] = useState(false);
   const [fountainsLoading, setFountainsLoading] = useState(false);
+  const [ictuLoading, setIctuLoading] = useState(false);
 
   const [dataLoaded, setDataLoaded] = useState(false);
   const [heatDataLoaded, setHeatDataLoaded] = useState(false);
   const [fountainsDataLoaded, setFountainsDataLoaded] = useState(false);
+  const [ictuDataLoaded, setIctuDataLoaded] = useState(false);
 
   const [status, setStatus] = useState<string | null>(null);
   const [totalZones, setTotalZones] = useState(0);
   const [heatZones, setHeatZones] = useState(0);
   const [fountainsCount, setFountainsCount] = useState(0);
+  const [ictuCount, setIctuCount] = useState(0);
 
   const [currentZoom, setCurrentZoom] = useState(BORDEAUX_ZOOM);
   const [vegetationDisplay, setVegetationDisplay] = useState<VegetationDisplayOption>("none");
+  const [ictuDisplay, setIctuDisplay] = useState<ICTUDisplayOption>("none");
   const [heatFilters, setHeatFilters] = useState<Set<HeatCategory>>(new Set(ALL_HEAT_CATEGORIES));
   const heatGeoJsonRef = useRef<FeatureCollectionWithMeta | null>(null);
+  const ictuGeoJsonRef = useRef<FeatureCollectionWithMeta | null>(null);
+  const ictuRequestIdRef = useRef(0);
   const allHeatFiltersSelected = ALL_HEAT_CATEGORIES.every((cat) => heatFilters.has(cat));
+  const ictuLayerRef = useRef<L.Layer | null>(null);
 
   const buildViewportQuery = useCallback(() => {
     const map = mapRef.current;
@@ -318,19 +407,23 @@ export default function BordeauxMap() {
     // Retirer toutes les couches
     if (vegetationLayerRef.current) mapRef.current.removeLayer(vegetationLayerRef.current);
     if (heatLayerRef.current) mapRef.current.removeLayer(heatLayerRef.current);
+    if (ictuLayerRef.current) mapRef.current.removeLayer(ictuLayerRef.current);
     if (fountainsLayerRef.current) mapRef.current.removeLayer(fountainsLayerRef.current);
 
-    // Ajouter dans l'ordre souhaité : végétation (bas) -> îlots -> fontaines (haut)
+    // Ajouter dans l'ordre souhaité : végétation (bas) -> îlots -> ICTU -> fontaines (haut)
     if (vegVisible && vegetationLayerRef.current) {
       vegetationLayerRef.current.addTo(mapRef.current);
     }
     if (heatVisible && heatLayerRef.current) {
       heatLayerRef.current.addTo(mapRef.current);
     }
+    if (ictuVisible && ictuLayerRef.current) {
+      ictuLayerRef.current.addTo(mapRef.current);
+    }
     if (fountainsVisible && fountainsLayerRef.current) {
       fountainsLayerRef.current.addTo(mapRef.current);
     }
-  }, [vegVisible, heatVisible, fountainsVisible]);
+  }, [vegVisible, heatVisible, ictuVisible, fountainsVisible]);
 
   // ── Status updates ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -375,9 +468,12 @@ export default function BordeauxMap() {
 
       map.createPane(VEGETATION_PANE);
       map.createPane(HEAT_PANE);
+      map.createPane(ICTU_PANE);
 
       map.getPane(VEGETATION_PANE)!.style.zIndex = "390";
       map.getPane(HEAT_PANE)!.style.zIndex = "395";
+      map.getPane(ICTU_PANE)!.style.zIndex = "399";
+      map.getPane(ICTU_PANE)!.style.pointerEvents = "none";
 
       L.tileLayer(
         "https://tiles.stadiamaps.com/tiles/alidade_bright/{z}/{x}/{y}{r}.png",
@@ -618,6 +714,120 @@ export default function BordeauxMap() {
     void renderHeatLayer(heatGeoJsonRef.current, heatFilters);
   }, [heatFilters, heatVisible, heatDataLoaded, renderHeatLayer]);
 
+  // ── Fetch and render ICTU layer ─────────────────────────────────────────────
+  const renderICTULayer = useCallback(async (geoJson: FeatureCollectionWithMeta, displayMode: ICTUDisplayOption) => {
+    const L = await import("leaflet");
+    
+    if (displayMode === "none") {
+      replaceLayer(ictuLayerRef, null, ictuVisible);
+      return;
+    }
+
+    const bounds = computeICTUMetricBounds(geoJson, displayMode);
+    if (!bounds) {
+      replaceLayer(ictuLayerRef, null, ictuVisible);
+      return;
+    }
+
+    const layerGroup = L.layerGroup();
+
+    for (const feature of geoJson.features) {
+      if (feature.geometry.type === "Point" && feature.geometry.coordinates) {
+        const [lng, lat] = feature.geometry.coordinates;
+        const props = (feature.properties ?? {}) as Record<string, unknown>;
+        const value = extractICTUMetricValue(props, displayMode);
+
+        if (value === null) continue;
+
+        const color = getICTUColor(value);
+        const marker = L.circleMarker([lat, lng], {
+          color,
+          fillColor: color,
+          fillOpacity: 0.9,
+          radius: 5,
+          weight: 1.5,
+          renderer: canvasRendererRef.current ?? undefined,
+        });
+
+        marker.on("mouseover", () => {
+          marker.setStyle({ radius: 7, fillOpacity: 1, weight: 2 });
+        });
+        marker.on("mouseout", () => {
+          marker.setStyle({ radius: 5, fillOpacity: 0.9, weight: 1.5 });
+        });
+
+        const labelMap: Record<ICTUDisplayOption, string> = {
+          ictu_min: "ICTU min",
+          ictu_median: "ICTU médian",
+          ictu_max: "ICTU max",
+          none: "ICTU",
+        };
+
+        marker.bindPopup(
+          `<div style="font-family:system-ui;font-size:12px;line-height:1.5">
+            <div><b>${labelMap[displayMode]}:</b> ${toDisplayNumber(value)}</div>
+          </div>`
+        );
+
+        layerGroup.addLayer(marker);
+      }
+    }
+
+    const markers = layerGroup.getLayers();
+    console.log(`[ICTU] Total markers créés: ${markers.length}`);
+    setIctuCount(markers.length);
+
+    replaceLayer(ictuLayerRef, layerGroup, ictuVisible);
+  }, [ictuVisible, replaceLayer]);
+
+  const fetchICTU = useCallback(async (forceReload = false, displayMode: ICTUDisplayOption = ictuDisplay) => {
+    if (displayMode === "none") {
+      renderICTULayer.length; // suppress warning
+      return;
+    }
+
+    const requestId = ++ictuRequestIdRef.current;
+    setIctuLoading(true);
+    setStatus("Chargement de l'indice de confort thermique urbain…");
+
+    try {
+      const res = await fetch(`/api/heatmap/ictu/geojson${buildViewportQuery()}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+
+      const geoJson: FeatureCollectionWithMeta = await res.json();
+      if (requestId !== ictuRequestIdRef.current) return;
+
+      console.log(`[ICTU] Features chargées: ${geoJson.features.length}`);
+      ictuGeoJsonRef.current = geoJson;
+      await renderICTULayer(geoJson, displayMode);
+      setIctuDataLoaded(true);
+      setStatus(
+        geoJson.meta?.simplified
+          ? `${geoJson.meta.displayedCount} / ${geoJson.meta.totalMatching} points affichés`
+          : `${geoJson.features.length} points ICTU affichés`
+      );
+    } catch (err) {
+      console.error("Erreur chargement ICTU:", err);
+      setStatus("Erreur de chargement — voir console");
+    } finally {
+      if (requestId === ictuRequestIdRef.current) {
+        setIctuLoading(false);
+      }
+    }
+  }, [buildViewportQuery, renderICTULayer, ictuDisplay]);
+
+  // Re-render ICTU layer when display mode changes
+  useEffect(() => {
+    if (!ictuVisible || !ictuDataLoaded || !ictuGeoJsonRef.current) return;
+    void renderICTULayer(ictuGeoJsonRef.current, ictuDisplay);
+  }, [ictuDisplay, ictuVisible, ictuDataLoaded, renderICTULayer]);
+
+  // Refresh ICTU when visibility or data load changes
+  useEffect(() => {
+    if (!ictuVisible || !ictuDataLoaded || ictuDisplay === "none") return;
+    void fetchICTU(true, ictuDisplay);
+  }, [ictuDisplay, ictuVisible, ictuDataLoaded, fetchICTU]);
+
   const fetchFountains = useCallback(async () => {
     setFountainsLoading(true);
     setStatus("Chargement des fontaines…");
@@ -703,6 +913,9 @@ export default function BordeauxMap() {
         if (heatVisible) {
           void fetchHeatIslands();
         }
+        if (ictuVisible && ictuDisplay !== "none") {
+          void fetchICTU(true, ictuDisplay);
+        }
       }, 120);
     };
 
@@ -716,7 +929,7 @@ export default function BordeauxMap() {
       mapRef.current?.off("moveend", handleViewportChange);
       mapRef.current?.off("zoomend", handleViewportChange);
     };
-  }, [vegVisible, heatVisible, vegetationDisplay, fetchVegetation, fetchHeatIslands]);
+  }, [vegVisible, heatVisible, ictuVisible, ictuDisplay, vegetationDisplay, fetchVegetation, fetchHeatIslands, fetchICTU]);
 
   // ── Toggle handler ──────────────────────────────────────────────────────────
   const handleToggleVegetation = useCallback(async () => {
@@ -738,11 +951,18 @@ export default function BordeauxMap() {
       setHeatVisible(false);
       return;
     }
+
+    // ICTU and heat islands are mutually exclusive in the UI.
+    if (ictuVisible) {
+      setIctuVisible(false);
+      setIctuDisplay("none");
+    }
+
     if (!heatDataLoaded) {
       await fetchHeatIslands();
     }
     setHeatVisible(true);
-  }, [heatDataLoaded, fetchHeatIslands, heatVisible]);
+  }, [heatDataLoaded, fetchHeatIslands, heatVisible, ictuVisible]);
 
   const handleToggleFountains = useCallback(async () => {
     if (!fountainsDataLoaded) {
@@ -750,6 +970,25 @@ export default function BordeauxMap() {
     }
     setFountainsVisible((visible) => !visible);
   }, [fountainsDataLoaded, fetchFountains]);
+
+  const handleToggleICTU = useCallback(async () => {
+    if (ictuVisible) {
+      setIctuVisible(false);
+      setIctuDisplay("none");
+      return;
+    }
+
+    // ICTU and heat islands are mutually exclusive in the UI.
+    if (heatVisible) {
+      setHeatVisible(false);
+    }
+
+    setIctuDisplay("ictu_median");
+    if (!ictuDataLoaded) {
+      await fetchICTU(false, "ictu_median");
+    }
+    setIctuVisible(true);
+  }, [heatVisible, ictuDataLoaded, fetchICTU, ictuVisible]);
 
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -778,6 +1017,7 @@ export default function BordeauxMap() {
             </span>
             Végétation
             {loading && <span className="btn-spinner" />}
+            <span className="layer-btn-tooltip">{LAYER_HELP_TOOLTIPS.vegetation}</span>
           </button>
 
           {vegVisible && (
@@ -816,6 +1056,7 @@ export default function BordeauxMap() {
             </span>
             Îlots de chaleur/fraicheur
             {heatLoading && <span className="btn-spinner" />}
+            <span className="layer-btn-tooltip">{LAYER_HELP_TOOLTIPS.heat}</span>
           </button>
 
           {heatVisible && (
@@ -864,7 +1105,46 @@ export default function BordeauxMap() {
             </span>
             Fontaines
             {fountainsLoading && <span className="btn-spinner" />}
+            <span className="layer-btn-tooltip">{LAYER_HELP_TOOLTIPS.fountains}</span>
           </button>
+
+          <button
+            className={`layer-btn ${ictuVisible ? "active" : ""}`}
+            onClick={handleToggleICTU}
+            disabled={ictuLoading}
+            aria-pressed={ictuVisible}
+          >
+            <span className="layer-icon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2v20m0-20a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 8v4m0 4v2"/>
+              </svg>
+            </span>
+            Confort thermique (ICTU)
+            {ictuLoading && <span className="btn-spinner" />}
+            <span className="layer-btn-tooltip">{LAYER_HELP_TOOLTIPS.ictu}</span>
+          </button>
+
+          {ictuVisible && (
+            <div className="display-options">
+              <span className="layers-label">Affichage</span>
+              {(["ictu_min", "ictu_median", "ictu_max"] as const).map((key) => (
+                <div key={key} className="display-option-row">
+                  <label className="display-option-check">
+                    <input
+                      type="checkbox"
+                      checked={ictuDisplay === key}
+                      onChange={() => setIctuDisplay((prev) => (prev === key ? "none" : key))}
+                    />
+                    {key === "ictu_min" ? "ICTU min" : key === "ictu_median" ? "ICTU médian" : "ICTU max"}
+                  </label>
+                  <span className="info-hover" aria-label="Information">
+                    <span className="info-btn">?</span>
+                    <span className="info-popover">{ICTU_TOOLTIPS[key]}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {status && (
@@ -879,10 +1159,10 @@ export default function BordeauxMap() {
       <div ref={mapContainerRef} className="map-container" />
 
       {/* ── Legend ── */}
-      {(vegVisible || heatVisible || fountainsVisible) && !(loading || heatLoading || fountainsLoading) && (
+      {(vegVisible || heatVisible || fountainsVisible || ictuVisible) && !(loading || heatLoading || fountainsLoading || ictuLoading) && (
         <div className="map-legend">
           {vegVisible && (
-            <div style={{ marginBottom: (heatVisible || fountainsVisible) ? 10 : 0 }}>
+            <div style={{ marginBottom: (heatVisible || fountainsVisible || ictuVisible) ? 10 : 0 }}>
               <p className="legend-title">Végétation urbaine</p>
               {vegetationDisplay === "none" ? (
                 <span style={{ fontSize: 12, color: "#666" }}>Choisir un affichage pour colorer les hexagones</span>
@@ -937,7 +1217,7 @@ export default function BordeauxMap() {
           )}
 
           {heatVisible && (
-            <div style={{ marginBottom: fountainsVisible ? 10 : 0 }}>
+            <div style={{ marginBottom: fountainsVisible || ictuVisible ? 10 : 0 }}>
               <p className="legend-title">Îlots de chaleur/fraicheur</p>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -950,6 +1230,27 @@ export default function BordeauxMap() {
                 </div>
                 <span style={{ fontSize: 12, color: "#555" }}>{heatZones} zones</span>
               </div>
+            </div>
+          )}
+
+          {ictuVisible && ictuDisplay !== "none" && (
+            <div style={{ marginBottom: fountainsVisible ? 10 : 0 }}>
+              <p className="legend-title">Confort thermique urbain (ICTU)</p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <div style={{ width: 12, height: 12, borderRadius: 3, background: "#FF0033", border: "1px solid rgba(0,0,0,0.12)" }} />
+                  <span style={{ fontSize: 11, color: "#555" }}>ICTU de 0 à 1 : confort faible</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <div style={{ width: 12, height: 12, borderRadius: 3, background: "#C42EFF", border: "1px solid rgba(0,0,0,0.12)" }} />
+                  <span style={{ fontSize: 11, color: "#555" }}>ICTU de 1 à 2 : confort moyen</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <div style={{ width: 12, height: 12, borderRadius: 3, background: "#5C7AFF", border: "1px solid rgba(0,0,0,0.12)" }} />
+                  <span style={{ fontSize: 11, color: "#555" }}>ICTU de 2 à 3 : confort élevé</span>
+                </div>
+              </div>
+              <span style={{ fontSize: 12, color: "#555", display: "block", marginTop: 4 }}>{ictuCount} points</span>
             </div>
           )}
 
@@ -978,9 +1279,7 @@ export default function BordeauxMap() {
           background: rgba(255,255,255,0.96); backdrop-filter: blur(12px);
           border: 1px solid rgba(0,0,0,0.08); border-radius: 14px;
           padding: 10px 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.10); width: 260px;
-          max-height: min(52vh, calc(100% - 24px));
-          overflow-y: auto;
-          overflow-x: hidden;
+          overflow: visible;
         }
         .toolbar-left { display: flex; flex-direction: column; padding-bottom: 8px; border-bottom: 1px solid rgba(0,0,0,0.08); }
         .toolbar-title { font-size: 13px; font-weight: 600; color: #1a1a1a; letter-spacing: -0.2px; }
@@ -993,10 +1292,36 @@ export default function BordeauxMap() {
           background: transparent; border: 1px solid rgba(0,0,0,0.12);
           border-radius: 8px; cursor: pointer; transition: all 0.15s ease;
           user-select: none; line-height: 1; justify-content: flex-start; width: 100%;
+          position: relative;
+          overflow: visible;
         }
         .layer-btn:not(:disabled):hover { background: #f0f9f4; border-color: rgba(45,106,79,0.4); color: #2d6a4f; }
         .layer-btn.active { background: #d8f3dc; border-color: #52b788; color: #1b4332; }
         .layer-btn:disabled { opacity: 0.38; cursor: not-allowed; }
+        .layer-btn-tooltip {
+          position: absolute;
+          left: calc(100% + 10px);
+          top: 50%;
+          transform: translateY(-50%);
+          min-width: 180px;
+          max-width: 240px;
+          font-size: 11px;
+          line-height: 1.35;
+          color: #555;
+          background: rgba(255, 255, 255, 0.98);
+          border: 1px solid rgba(45, 106, 79, 0.28);
+          border-radius: 8px;
+          box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+          padding: 7px 9px;
+          opacity: 0;
+          visibility: hidden;
+          pointer-events: none;
+          transition: opacity 0.12s ease;
+          z-index: 30;
+          text-align: left;
+          font-weight: 400;
+        }
+        .layer-btn:hover .layer-btn-tooltip { opacity: 1; visibility: visible; }
         .layer-icon { display: flex; align-items: center; line-height: 0; }
         .btn-spinner { display: inline-block; width: 10px; height: 10px; border: 1.5px solid rgba(27,67,50,0.3); border-top-color: #2d6a4f; border-radius: 50%; animation: spin 0.7s linear infinite; margin-left: 2px; }
         .status-pill { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: #f0f9f4; border: 1px solid rgba(45,106,79,0.2); border-radius: 10px; font-size: 12px; color: #2d6a4f; font-weight: 500; }
