@@ -1,0 +1,36 @@
+{
+  "name": "hackathon-bdx-backend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "sh -c 'PORT=${PORT:-3001}; lsof -ti tcp:$PORT | xargs -r kill -9; nodemon'",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "tsx prisma/seed.ts",
+    "import:data": "tsx scripts/import_bordeaux_data.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^17.3.1",
+    "express": "^4.19.0",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^20.0.0",
+    "@types/pg": "^8.20.0",
+    "nodemon": "^3.1.0",
+    "prisma": "^5.22.0",
+    "ts-node": "^10.9.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.4.0"
+  }
+}

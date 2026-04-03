@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Leaflet CSS — required for map rendering */
+@import "leaflet/dist/leaflet.css";
+
+@layer base {
+  html,
+  body {
+    @apply h-full m-0 p-0;
+    font-family: "DM Sans", system-ui, sans-serif;
+  }
+}

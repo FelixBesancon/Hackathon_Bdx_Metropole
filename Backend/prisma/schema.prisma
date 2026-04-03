@@ -1,0 +1,132 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model HeatZone {
+  id          Int      @id @default(autoincrement())
+  name        String
+  geometry    Json
+  temperature Float
+  intensity   Int
+  createdAt   DateTime @default(now())
+}
+
+model HeatSourceFeature {
+  id         Int      @id @default(autoincrement())
+  sourceId   String   @unique
+  geometry   Json
+  properties Json
+  minLng     Float
+  minLat     Float
+  maxLng     Float
+  maxLat     Float
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([minLng, maxLng])
+  @@index([minLat, maxLat])
+}
+
+model VegetationFeature {
+  id         Int      @id @default(autoincrement())
+  sourceId   String   @unique
+  geometry   Json
+  properties Json
+  minLng     Float
+  minLat     Float
+  maxLng     Float
+  maxLat     Float
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([minLng, maxLng])
+  @@index([minLat, maxLat])
+}
+
+model FountainFeature {
+  id         Int      @id @default(autoincrement())
+  sourceId   String   @unique
+  datasetId  String
+  geometry   Json
+  properties Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([datasetId])
+}
+
+model ICTUFeature {
+  id         Int      @id @default(autoincrement())
+  sourceId   String   @unique
+  geometry   Json
+  properties Json
+  ictuMin    Float?
+  ictuMean   Float?
+  ictuMedian Float?
+  ictuMax    Float?
+  minLng     Float
+  minLat     Float
+  maxLng     Float
+  maxLat     Float
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([ictuMedian])
+  @@index([minLng, maxLng])
+  @@index([minLat, maxLat])
+}
+
+model DatasetSyncState {
+  datasetKey        String            @id
+  signature         String?
+  remoteModified    String?
+  remoteProcessed   String?
+  remoteRecords     Int?
+  lastAttemptAt     DateTime?
+  lastSuccessAt     DateTime?
+  lastStatus        DatasetSyncStatus @default(IDLE)
+  lastError         String?
+  updatedAt         DateTime          @updatedAt
+}
+
+enum DatasetSyncStatus {
+  IDLE
+  RUNNING
+  SUCCESS
+  ERROR
+}
+
+model CitizenAction {
+  id        Int        @id @default(autoincrement())
+  type      ActionType
+  lat       Float
+  lng       Float
+  radius    Float
+  impact    Float
+  // Champs carte pixel (optionnels)
+  col       Int?
+  row       Int?
+  mx        Float?
+  my        Float?
+  tileName  String?
+  createdAt DateTime   @default(now())
+}
+
+enum ActionType {
+  VEGETATION
+  WATER_POINT
+  SHADE
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  name      String
+  createdAt DateTime @default(now())
+}
