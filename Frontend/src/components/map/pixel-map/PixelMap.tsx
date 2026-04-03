@@ -14,6 +14,13 @@ const MODE_HINTS: Record<ToolMode, string> = {
   info: "\u{1F50D} Cliquez sur une zone pour voir ses infos.",
 };
 
+const MODE_TOOLTIPS: Record<ToolMode, string> = {
+  tree: "Planter un arbre (touche 1) — Cliquez sur une zone plantable pour ajouter un arbre et réduire la chaleur",
+  fountain: "Installer un point d'eau (touche 2) — Cliquez pour placer une fontaine ou un point de fraîcheur",
+  pan: "Naviguer (touche 3) — Clic + glisser pour déplacer la carte, scroll pour zoomer",
+  info: "Inspecter une zone (touche 4) — Cliquez pour afficher les informations d'une tuile",
+};
+
 const PIXEL_MAP_STYLES = `
 @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap');
 
@@ -428,7 +435,7 @@ export default function PixelMap() {
           BORDEAUX <span style={{ color: V.accent2 }}>VERT</span>
         </div>
         {(["tree", "fountain", "pan", "info"] as ToolMode[]).map((m) => (
-          <button key={m} onClick={() => setMode(m)} style={btnStyle(mode === m, m === "fountain")}>
+          <button key={m} onClick={() => setMode(m)} title={MODE_TOOLTIPS[m]} style={btnStyle(mode === m, m === "fountain")}>
             {m === "tree" ? "\u{1F331} ARBRE" : m === "fountain" ? "\u26F2 FONTAINE" : m === "pan" ? "\u270B NAVIGUER" : "\u{1F50D} INFOS"}
           </button>
         ))}
@@ -461,7 +468,7 @@ export default function PixelMap() {
             <h3 style={{ fontFamily: "'Press Start 2P',monospace", fontSize: 6, color: V.dim, letterSpacing: 2, marginBottom: 9, textTransform: "uppercase" }}>Mode actif</h3>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginBottom: 8 }}>
               {(["tree", "fountain", "pan", "info"] as ToolMode[]).map((m) => (
-                <button key={m} onClick={() => setMode(m)} style={{ ...btnStyle(mode === m, m === "fountain"), fontSize: 6 }}>
+                <button key={m} onClick={() => setMode(m)} title={MODE_TOOLTIPS[m]} style={{ ...btnStyle(mode === m, m === "fountain"), fontSize: 6 }}>
                   {m === "tree" ? "\u{1F331} ARBRE" : m === "fountain" ? "\u26F2 FONTAINE" : m === "pan" ? "\u270B NAVIGUER" : "\u{1F50D} INFOS"}
                 </button>
               ))}
@@ -475,6 +482,7 @@ export default function PixelMap() {
             <button
               onClick={toggleHeat}
               disabled={heatLoading}
+              title="Afficher / masquer la couche des îlots de chaleur urbains — zones rouges = plus chaudes que la moyenne, bleues = plus fraîches"
               style={{
                 width: "100%", fontFamily: "'Press Start 2P',monospace", fontSize: 6,
                 padding: "7px 9px", cursor: heatLoading ? "wait" : "pointer",
@@ -531,10 +539,10 @@ export default function PixelMap() {
           <div style={{ padding: 13, borderBottom: `1px solid rgba(126,232,74,0.1)` }}>
             <h3 style={{ fontFamily: "'Press Start 2P',monospace", fontSize: 6, color: V.dim, letterSpacing: 2, marginBottom: 9, textTransform: "uppercase" }}>Impact ecologique</h3>
             <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
-              <button onClick={() => setActiveTab("trees")} style={{ flex: 1, fontFamily: "'Press Start 2P',monospace", fontSize: 6, padding: 5, background: activeTab === "trees" ? V.mid : V.dark, border: `1px solid ${activeTab === "trees" ? V.accent : V.border}`, color: activeTab === "trees" ? V.accent : V.dim, cursor: "pointer", textAlign: "center" }}>
+              <button onClick={() => setActiveTab("trees")} title="Voir les statistiques et l'impact écologique des arbres plantés" style={{ flex: 1, fontFamily: "'Press Start 2P',monospace", fontSize: 6, padding: 5, background: activeTab === "trees" ? V.mid : V.dark, border: `1px solid ${activeTab === "trees" ? V.accent : V.border}`, color: activeTab === "trees" ? V.accent : V.dim, cursor: "pointer", textAlign: "center" }}>
                 {"\u{1F333}"} ARBRES
               </button>
-              <button onClick={() => setActiveTab("fountains")} style={{ flex: 1, fontFamily: "'Press Start 2P',monospace", fontSize: 6, padding: 5, background: activeTab === "fountains" ? V.mid : V.dark, border: `1px solid ${activeTab === "fountains" ? "#58d0f0" : V.border}`, color: activeTab === "fountains" ? "#58d0f0" : V.dim, cursor: "pointer", textAlign: "center" }}>
+              <button onClick={() => setActiveTab("fountains")} title="Voir les statistiques des points d'eau et fontaines installés" style={{ flex: 1, fontFamily: "'Press Start 2P',monospace", fontSize: 6, padding: 5, background: activeTab === "fountains" ? V.mid : V.dark, border: `1px solid ${activeTab === "fountains" ? "#58d0f0" : V.border}`, color: activeTab === "fountains" ? "#58d0f0" : V.dim, cursor: "pointer", textAlign: "center" }}>
                 {"\u{26F2}"} FONTAINES
               </button>
             </div>
